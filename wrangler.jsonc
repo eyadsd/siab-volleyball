@@ -13,11 +13,19 @@
     "run_worker_first": ["/api/*"]
   },
 
+  // Served on the custom domain only — no workers.dev address. Cloudflare
+  // creates the DNS records and issues the certificates on deploy.
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "siabofficial.com", "custom_domain": true },
+    { "pattern": "www.siabofficial.com", "custom_domain": true }
+  ],
+
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "siab-db",
-      "database_id": "PASTE_YOUR_DATABASE_ID_HERE"
+      "database_id": "fdf32ca2-c3a1-4ffd-945b-57e033bbe808"
     }
   ],
 

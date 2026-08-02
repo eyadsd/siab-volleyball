@@ -1,0 +1,25 @@
+{
+  "name": "siab",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-01-01",
+
+  // The built React app is served as static assets. Anything under /api
+  // is handed to the Worker first; everything else falls back to index.html
+  // so client-side routing works.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "siab-db",
+      "database_id": "PASTE_YOUR_DATABASE_ID_HERE"
+    }
+  ],
+
+  "observability": { "enabled": true }
+}

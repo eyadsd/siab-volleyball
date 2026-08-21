@@ -9,8 +9,25 @@ CREATE TABLE IF NOT EXISTS polls (
   cap         INTEGER NOT NULL,
   notes       TEXT,
   closed      INTEGER NOT NULL DEFAULT 0,
-  created_at  INTEGER NOT NULL
+  created_at  INTEGER NOT NULL,
+
+  -- SHA-256 of the game's own passcode, salted with the poll id. Whoever
+  -- posts a game sets this and can then run it; the site-wide
+  -- ADMIN_PASSCODE overrides it everywhere. NULL means admin-only, which
+  -- is what games created before per-game passcodes existed look like.
+  host_hash   TEXT,
+
+  -- How long the game runs, so "it's over" is a real moment rather than a
+  -- guess. Used to compute ends_at.
+  duration_min INTEGER NOT NULL DEFAULT 120,
+
+  -- Epoch ms the game finishes. Rows past this (plus a grace period) are
+  -- deleted on the next API request. NULL for date-TBD games, which stay
+  -- on the board until someone removes them by hand.
+  ends_at     INTEGER
 );
+
+CREATE INDEX IF NOT EXISTS polls_ends ON polls(ends_at);
 
 CREATE TABLE IF NOT EXISTS rsvps (
   -- seq is the fairness guarantee: a strictly increasing signup counter.
@@ -21,7 +38,7 @@ CREATE TABLE IF NOT EXISTS rsvps (
   poll_id     TEXT NOT NULL,
   name        TEXT NOT NULL,
   name_key    TEXT NOT NULL,   -- lowercased, for case-insensitive dedupe
-  skill       TEXT NOT NULL,   -- B | I | A
+  skill       TEXT NOT NULL,   -- B | BI | I | UI | A
   created_at  INTEGER NOT NULL
 );
 

@@ -18,11 +18,27 @@
  * and 7v6 isn't.
  */
 
-export const WEIGHT = { B: 1, I: 2, A: 3 };
+/**
+ * Five levels, because three made people cluster in the middle: nobody
+ * wants to call themselves Advanced or Beginner, so almost everyone
+ * picked Intermediate and the balancer had nothing to work with. The two
+ * halfway rungs give people an honest answer they'll actually pick.
+ *
+ * B, I and A keep their old ids, so RSVPs stored under the three-level
+ * scale still read correctly — they just sit at 1, 3 and 5.
+ */
+export const WEIGHT = { B: 1, BI: 2, I: 3, UI: 4, A: 5 };
 const w = (p) => WEIGHT[p.skill] ?? 1;
 
-/** How much one point of skill imbalance is worth in repeat-pairings. */
-const GAP_WEIGHT = 10;
+/**
+ * How much one point of skill imbalance is worth in repeat-pairings.
+ *
+ * Halved when the scale went from 1-3 to 1-5: a "point" is now half a
+ * skill step rather than a whole one, so 5 here prices a full step at the
+ * same 10 repeats it always cost. Raise it to favour balance, lower it to
+ * favour variety.
+ */
+const GAP_WEIGHT = 5;
 /** Random restarts. Cheap — rosters are tiny — and it's what buys variety. */
 const ATTEMPTS = 60;
 

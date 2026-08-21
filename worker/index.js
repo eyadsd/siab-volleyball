@@ -5,11 +5,27 @@
  * has to guess. Roster/waitlist split is derived from RSVP order, so
  * promotion off the waitlist is automatic — there is no "promote" step
  * to get wrong.
+ *
+ * Two levels of authority:
+ *
+ *   - Anyone can post a game, and sets their own passcode for it. That
+ *     passcode manages that one game and nothing else.
+ *   - ADMIN_PASSCODE (a Cloudflare secret) manages every game, including
+ *     ones whose host passcode nobody remembers.
  */
 
 import { mixRound } from "./balance.js";
 
-const SKILLS = new Set(["B", "I", "A"]);
+const SKILLS = new Set(["B", "BI", "I", "UI", "A"]);
+
+/** How long after a game ends before it's swept off the board. */
+const GRACE_MS = 60 * 60 * 1000;
+const DEFAULT_DURATION = 120;
+const MAX_DURATION = 720;
+/** Nothing can pin itself on the board longer than this. */
+const MAX_FUTURE_MS = 2 * 365 * 24 * 60 * 60 * 1000;
+const MIN_PASSCODE = 4;
+
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
@@ -18,8 +34,9 @@ const json = (data, status = 200) =>
 const bad = (msg, status = 400) => json({ error: msg }, status);
 const uid = () => crypto.randomUUID().slice(0, 12);
 const norm = (s) => String(s ?? "").trim().replace(/\s+/g, " ");
+const has = (body, k) => Object.prototype.hasOwnProperty.call(body, k);
 
-/** Constant-time string compare so the passcode can't be timed out byte by byte. */
+/** Constant-time string compare so a passcode can't be timed out byte by byte. */
 function safeEqual(a, b) {
   const enc = new TextEncoder();
   const x = enc.encode(a);
@@ -30,17 +47,81 @@ function safeEqual(a, b) {
   return diff === 0;
 }
 
+/**
+ * Host passcodes are stored hashed, salted with the poll id. They're
+ * low-value and get shared around a group chat, but a leaked database
+ * still shouldn't hand over a list of passcodes people reuse elsewhere.
+ * The poll id as salt means the same passcode on two games hashes
+ * differently.
+ */
+async function hashHostKey(pollId, passcode) {
+  const data = new TextEncoder().encode(`siab:${pollId}:${passcode}`);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function isAdmin(request, env) {
   const key = request.headers.get("x-siab-key");
   if (!key || !env.ADMIN_PASSCODE) return false;
   return safeEqual(key, env.ADMIN_PASSCODE);
 }
 
+/** Does this request get to run this specific game? */
+async function canManage(request, env, poll) {
+  if (isAdmin(request, env)) return true;
+  if (!poll || !poll.host_hash) return false;
+  const key = request.headers.get("x-siab-poll-key");
+  if (!key) return false;
+  return safeEqual(await hashHostKey(poll.id, key), poll.host_hash);
+}
+
+/**
+ * When the game is over, as epoch ms.
+ *
+ * The client sends `endsAt` computed in the organizer's own timezone,
+ * which is the only place the real timezone is known — date and time are
+ * stored as bare strings with no offset. The UTC fallback is for API
+ * callers that don't send one; it errs late, which only means a finished
+ * game lingers a couple of hours longer.
+ */
+function computeEndsAt(endsAt, date, time, durationMin) {
+  if (!date) return null;
+  const explicit = Number(endsAt);
+  if (Number.isFinite(explicit) && explicit > 0)
+    return Math.min(Math.round(explicit), Date.now() + MAX_FUTURE_MS);
+  const start = Date.parse(`${date}T${time || "00:00"}:00Z`);
+  if (!Number.isFinite(start)) return null;
+  return start + durationMin * 60000;
+}
+
+/**
+ * Drop games that finished more than the grace period ago, along with
+ * their RSVPs and rounds. Runs on every API request — the SELECT is
+ * indexed and usually matches nothing, and there is no cron on the free
+ * tier to do it on a schedule.
+ */
+async function purgeExpired(env) {
+  const stale = await env.DB.prepare(
+    `SELECT id FROM polls WHERE ends_at IS NOT NULL AND ends_at < ?`
+  ).bind(Date.now() - GRACE_MS).all();
+
+  const ids = stale.results.map((r) => r.id);
+  if (!ids.length) return;
+
+  const marks = ids.map(() => "?").join(",");
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM rounds WHERE poll_id IN (${marks})`).bind(...ids),
+    env.DB.prepare(`DELETE FROM rsvps  WHERE poll_id IN (${marks})`).bind(...ids),
+    env.DB.prepare(`DELETE FROM polls  WHERE id      IN (${marks})`).bind(...ids),
+  ]);
+}
+
 /** Full board state: polls newest-relevant first, each with ordered RSVPs. */
 async function readState(env) {
   const [polls, rsvps, rounds] = await Promise.all([
     env.DB.prepare(
-      `SELECT id,title,date,time,location,cap,notes,closed,created_at
+      `SELECT id,title,date,time,location,cap,notes,closed,created_at,
+              duration_min,ends_at,host_hash
          FROM polls ORDER BY closed ASC, COALESCE(date,'9999-12-31') ASC, created_at DESC`
     ).all(),
     env.DB.prepare(
@@ -85,13 +166,18 @@ async function readState(env) {
       notes: p.notes,
       closed: !!p.closed,
       createdAt: p.created_at,
+      durationMin: p.duration_min ?? DEFAULT_DURATION,
+      endsAt: p.ends_at,
+      // The hash never leaves the server; the client only needs to know
+      // whether there is a host passcode worth prompting for.
+      hasHost: !!p.host_hash,
       rsvps: byPoll.get(p.id) || [],
       rounds: roundsByPoll.get(p.id) || [],
     })),
   };
 }
 
-const ok = async (env) => json(await readState(env));
+const ok = async (env, extra) => json({ ...(await readState(env)), ...extra });
 
 async function getPoll(env, id) {
   return env.DB.prepare(`SELECT * FROM polls WHERE id=?`).bind(id).first();
@@ -102,55 +188,87 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/api/, "");
     const method = request.method;
-    const admin = isAdmin(request, env);
 
     let body = {};
     if (method !== "GET" && method !== "HEAD") {
       body = await request.json().catch(() => ({}));
     }
 
-    const need = () => (admin ? null : bad("Organizer passcode required.", 401));
-
     try {
+      await purgeExpired(env);
+
       /* ---- board ------------------------------------------------ */
       if (path === "/state" && method === "GET") return ok(env);
 
-      /* ---- organizer sign in ------------------------------------ */
+      /* ---- admin sign in ---------------------------------------- */
       if (path === "/admin/verify" && method === "POST") {
         if (!env.ADMIN_PASSCODE)
-          return bad("No organizer passcode is set on the server yet.", 503);
+          return bad("No admin passcode is set on the server yet.", 503);
         if (!safeEqual(String(body.passcode ?? ""), env.ADMIN_PASSCODE))
           return bad("That passcode doesn't match.", 401);
         return json({ ok: true });
       }
 
-      /* ---- create a game ---------------------------------------- */
+      /* ---- post a game — open to anyone ------------------------- */
       if (path === "/polls" && method === "POST") {
-        const guard = need();
-        if (guard) return guard;
-
         const title = norm(body.title);
         const cap = Number(body.cap);
+        const passcode = String(body.hostPasscode ?? "");
+
         if (title.length < 2) return bad("Give the game a name players will recognize.");
         if (!Number.isInteger(cap) || cap < 2 || cap > 60)
           return bad("Player cap has to be a whole number between 2 and 60.");
+        if (passcode.length < MIN_PASSCODE)
+          return bad(
+            `Set a passcode of at least ${MIN_PASSCODE} characters — it's what lets you run this game later.`
+          );
+
+        const duration = has(body, "durationMin") ? Number(body.durationMin) : DEFAULT_DURATION;
+        if (!Number.isInteger(duration) || duration < 15 || duration > MAX_DURATION)
+          return bad(`Length has to be between 15 and ${MAX_DURATION} minutes.`);
+
+        const id = uid();
+        const date = norm(body.date) || null;
+        const time = norm(body.time) || null;
 
         await env.DB.prepare(
-          `INSERT INTO polls (id,title,date,time,location,cap,notes,closed,created_at)
-           VALUES (?,?,?,?,?,?,?,0,?)`
+          `INSERT INTO polls
+             (id,title,date,time,location,cap,notes,closed,created_at,
+              host_hash,duration_min,ends_at)
+           VALUES (?,?,?,?,?,?,?,0,?,?,?,?)`
         )
-          .bind(uid(), title, norm(body.date) || null, norm(body.time) || null,
-                norm(body.location) || null, cap, norm(body.notes) || null, Date.now())
+          .bind(
+            id, title, date, time, norm(body.location) || null, cap,
+            norm(body.notes) || null, Date.now(),
+            await hashHostKey(id, passcode), duration,
+            computeEndsAt(body.endsAt, date, time, duration)
+          )
           .run();
-        return ok(env);
+
+        // The client files its host key under this id, so it has to know it.
+        return ok(env, { created: id });
+      }
+
+      /* ---- prove you hold a game's passcode --------------------- */
+      const unlockMatch = path.match(/^\/polls\/([\w-]+)\/unlock$/);
+      if (unlockMatch && method === "POST") {
+        const poll = await getPoll(env, unlockMatch[1]);
+        if (!poll) return bad("That game is gone.", 404);
+        if (!poll.host_hash)
+          return bad("This game has no passcode of its own — only an admin can run it.", 403);
+        if (!safeEqual(await hashHostKey(poll.id, String(body.passcode ?? "")), poll.host_hash))
+          return bad("That passcode doesn't match this game.", 401);
+        return json({ ok: true });
       }
 
       /* ---- edit / delete a game --------------------------------- */
       const pollMatch = path.match(/^\/polls\/([\w-]+)$/);
-      if (pollMatch) {
-        const guard = need();
-        if (guard) return guard;
+      if (pollMatch && (method === "DELETE" || method === "PATCH")) {
         const id = pollMatch[1];
+        const poll = await getPoll(env, id);
+        if (!poll) return bad("That game is gone.", 404);
+        if (!(await canManage(request, env, poll)))
+          return bad("You need this game's passcode, or the admin one.", 401);
 
         if (method === "DELETE") {
           await env.DB.batch([
@@ -161,22 +279,57 @@ export default {
           return ok(env);
         }
 
-        if (method === "PATCH") {
-          const poll = await getPoll(env, id);
-          if (!poll) return bad("That game is gone.", 404);
-          if (typeof body.closed === "boolean") {
-            await env.DB.prepare(`UPDATE polls SET closed=? WHERE id=?`)
-              .bind(body.closed ? 1 : 0, id).run();
-          }
-          if (body.cap !== undefined) {
-            const cap = Number(body.cap);
-            if (!Number.isInteger(cap) || cap < 2 || cap > 60)
-              return bad("Player cap has to be a whole number between 2 and 60.");
-            // Past rounds are a record of what was played, so they stand.
-            await env.DB.prepare(`UPDATE polls SET cap=? WHERE id=?`).bind(cap, id).run();
-          }
-          return ok(env);
+        // PATCH. Only the fields actually sent are touched, so editing the
+        // start time doesn't quietly blank the notes.
+        const sets = [];
+        const vals = [];
+        const put = (col, v) => { sets.push(`${col}=?`); vals.push(v); };
+
+        if (has(body, "closed") && typeof body.closed === "boolean")
+          put("closed", body.closed ? 1 : 0);
+
+        if (has(body, "title")) {
+          const title = norm(body.title);
+          if (title.length < 2) return bad("Give the game a name players will recognize.");
+          put("title", title);
         }
+
+        if (has(body, "cap")) {
+          const cap = Number(body.cap);
+          if (!Number.isInteger(cap) || cap < 2 || cap > 60)
+            return bad("Player cap has to be a whole number between 2 and 60.");
+          // Past rounds are a record of what was played, so they stand.
+          put("cap", cap);
+        }
+
+        if (has(body, "location")) put("location", norm(body.location) || null);
+        if (has(body, "notes")) put("notes", norm(body.notes) || null);
+
+        // Date, time and length all feed ends_at, so touching any of them
+        // means recomputing expiry from the full post-edit picture.
+        const touchesSchedule =
+          has(body, "date") || has(body, "time") ||
+          has(body, "durationMin") || has(body, "endsAt");
+
+        let date = poll.date;
+        let time = poll.time;
+        let duration = poll.duration_min ?? DEFAULT_DURATION;
+
+        if (has(body, "date")) { date = norm(body.date) || null; put("date", date); }
+        if (has(body, "time")) { time = norm(body.time) || null; put("time", time); }
+        if (has(body, "durationMin")) {
+          duration = Number(body.durationMin);
+          if (!Number.isInteger(duration) || duration < 15 || duration > MAX_DURATION)
+            return bad(`Length has to be between 15 and ${MAX_DURATION} minutes.`);
+          put("duration_min", duration);
+        }
+        if (touchesSchedule) put("ends_at", computeEndsAt(body.endsAt, date, time, duration));
+
+        if (!sets.length) return bad("Nothing to change.");
+
+        vals.push(id);
+        await env.DB.prepare(`UPDATE polls SET ${sets.join(",")} WHERE id=?`).bind(...vals).run();
+        return ok(env);
       }
 
       /* ---- RSVP in / out ---------------------------------------- */
@@ -222,8 +375,10 @@ export default {
       /* ---- organizer removes a player --------------------------- */
       const kickMatch = path.match(/^\/polls\/([\w-]+)\/rsvps\/([\w-]+)$/);
       if (kickMatch && method === "DELETE") {
-        const guard = need();
-        if (guard) return guard;
+        const poll = await getPoll(env, kickMatch[1]);
+        if (!poll) return bad("That game is gone.", 404);
+        if (!(await canManage(request, env, poll)))
+          return bad("You need this game's passcode, or the admin one.", 401);
         await env.DB.prepare(`DELETE FROM rsvps WHERE poll_id=? AND id=?`)
           .bind(kickMatch[1], kickMatch[2]).run();
         return ok(env);
@@ -231,10 +386,12 @@ export default {
 
       /* ---- rounds: mix, undo, clear ----------------------------- */
       const roundsMatch = path.match(/^\/polls\/([\w-]+)\/rounds$/);
-      if (roundsMatch) {
-        const guard = need();
-        if (guard) return guard;
+      if (roundsMatch && (method === "POST" || method === "DELETE")) {
         const pollId = roundsMatch[1];
+        const poll = await getPoll(env, pollId);
+        if (!poll) return bad("That game is gone.", 404);
+        if (!(await canManage(request, env, poll)))
+          return bad("You need this game's passcode, or the admin one.", 401);
 
         // Wipe the whole session and start over.
         if (method === "DELETE") {
@@ -242,64 +399,61 @@ export default {
           return ok(env);
         }
 
-        if (method === "POST") {
-          const poll = await getPoll(env, pollId);
-          if (!poll) return bad("That game is gone.", 404);
+        const n = Number(body.teamCount);
+        if (!Number.isInteger(n) || n < 2 || n > 6) return bad("Pick between 2 and 6 sides.");
 
-          const n = Number(body.teamCount);
-          if (!Number.isInteger(n) || n < 2 || n > 6) return bad("Pick between 2 and 6 sides.");
+        const roster = await env.DB.prepare(
+          `SELECT id,name,skill FROM rsvps WHERE poll_id=? ORDER BY seq ASC LIMIT ?`
+        ).bind(pollId, poll.cap).all();
 
-          const roster = await env.DB.prepare(
-            `SELECT id,name,skill FROM rsvps WHERE poll_id=? ORDER BY seq ASC LIMIT ?`
-          ).bind(pollId, poll.cap).all();
+        const maxSide = Math.floor(roster.results.length / n);
+        if (maxSide < 1)
+          return bad(`You need at least ${n} players on the roster for ${n} sides.`);
 
-          const maxSide = Math.floor(roster.results.length / n);
-          if (maxSide < 1)
-            return bad(`You need at least ${n} players on the roster for ${n} sides.`);
-
-          // Side size is optional: leaving it out puts as many on court as fit.
-          let perTeam = null;
-          if (body.perTeam !== undefined && body.perTeam !== null) {
-            perTeam = Number(body.perTeam);
-            if (!Number.isInteger(perTeam) || perTeam < 1 || perTeam > 12)
-              return bad("Players a side has to be a whole number between 1 and 12.");
-            if (perTeam > maxSide)
-              return bad(
-                `${n} sides of ${perTeam} needs ${n * perTeam} players — the roster has ${roster.results.length}.`
-              );
-          }
-
-          // Previous rounds drive both the pairing memory and bench rotation.
-          const prev = await env.DB.prepare(
-            `SELECT teams,bench FROM rounds WHERE poll_id=? ORDER BY seq ASC`
-          ).bind(pollId).all();
-
-          const history = prev.results.map((r) => ({
-            teams: JSON.parse(r.teams),
-            bench: JSON.parse(r.bench),
-          }));
-
-          const round = mixRound(roster.results, n, perTeam, history);
-
-          await env.DB.prepare(
-            `INSERT INTO rounds
-               (id,poll_id,team_count,teams,bench,gap,fresh_pairs,repeats,created_at)
-             VALUES (?,?,?,?,?,?,?,?,?)`
-          ).bind(
-            uid(), pollId, n,
-            JSON.stringify(round.teams), JSON.stringify(round.bench),
-            round.gap, round.freshPairs, round.repeats, Date.now()
-          ).run();
-
-          return ok(env);
+        // Side size is optional: leaving it out puts as many on court as fit.
+        let perTeam = null;
+        if (body.perTeam !== undefined && body.perTeam !== null) {
+          perTeam = Number(body.perTeam);
+          if (!Number.isInteger(perTeam) || perTeam < 1 || perTeam > 12)
+            return bad("Players a side has to be a whole number between 1 and 12.");
+          if (perTeam > maxSide)
+            return bad(
+              `${n} sides of ${perTeam} needs ${n * perTeam} players — the roster has ${roster.results.length}.`
+            );
         }
+
+        // Previous rounds drive both the pairing memory and bench rotation.
+        const prev = await env.DB.prepare(
+          `SELECT teams,bench FROM rounds WHERE poll_id=? ORDER BY seq ASC`
+        ).bind(pollId).all();
+
+        const history = prev.results.map((r) => ({
+          teams: JSON.parse(r.teams),
+          bench: JSON.parse(r.bench),
+        }));
+
+        const round = mixRound(roster.results, n, perTeam, history);
+
+        await env.DB.prepare(
+          `INSERT INTO rounds
+             (id,poll_id,team_count,teams,bench,gap,fresh_pairs,repeats,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)`
+        ).bind(
+          uid(), pollId, n,
+          JSON.stringify(round.teams), JSON.stringify(round.bench),
+          round.gap, round.freshPairs, round.repeats, Date.now()
+        ).run();
+
+        return ok(env);
       }
 
       /* ---- undo a single round ---------------------------------- */
       const oneRound = path.match(/^\/polls\/([\w-]+)\/rounds\/([\w-]+)$/);
       if (oneRound && method === "DELETE") {
-        const guard = need();
-        if (guard) return guard;
+        const poll = await getPoll(env, oneRound[1]);
+        if (!poll) return bad("That game is gone.", 404);
+        if (!(await canManage(request, env, poll)))
+          return bad("You need this game's passcode, or the admin one.", 401);
         const res = await env.DB.prepare(`DELETE FROM rounds WHERE poll_id=? AND id=?`)
           .bind(oneRound[1], oneRound[2]).run();
         if (!res.meta.changes) return bad("That round is already gone.", 404);

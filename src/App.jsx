@@ -1,25 +1,57 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { api, getKey, setKey, clearKey } from "./api.js";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  api, getKey, setKey, clearKey,
+  hostKeys, getHostKey, setHostKey, clearHostKey, pruneHostKeys,
+} from "./api.js";
 
+/**
+ * Five rungs, not three. With Beginner / Intermediate / Advanced almost
+ * everyone picked the middle one — nobody volunteers to be the worst
+ * player in the gym, and nobody wants to over-claim either. The two
+ * halfway steps give people an answer they'll actually pick, which is
+ * what the balancer needs to work with.
+ */
 const SKILLS = [
-  { id: "A", label: "Advanced", w: 3 },
-  { id: "I", label: "Intermediate", w: 2 },
-  { id: "B", label: "Beginner", w: 1 },
+  { id: "A",  label: "Advanced",              short: "ADV",  w: 5 },
+  { id: "UI", label: "Upper-intermediate",    short: "UP-I", w: 4 },
+  { id: "I",  label: "Intermediate",          short: "INT",  w: 3 },
+  { id: "BI", label: "Beginner-intermediate", short: "B-I",  w: 2 },
+  { id: "B",  label: "Beginner",              short: "BEG",  w: 1 },
 ];
-const skillOf = (id) => SKILLS.find((s) => s.id === id) || SKILLS[2];
-const norm = (s) => s.trim().replace(/\s+/g, " ");
+const LADDER = [...SKILLS].reverse();
+const UNKNOWN = { id: "B", label: "Beginner", short: "BEG", w: 1 };
+const skillOf = (id) => SKILLS.find((s) => s.id === id) || UNKNOWN;
+
+const DURATIONS = [
+  { min: 60, label: "1 hour" },
+  { min: 90, label: "1½ hours" },
+  { min: 120, label: "2 hours" },
+  { min: 150, label: "2½ hours" },
+  { min: 180, label: "3 hours" },
+  { min: 240, label: "4 hours" },
+];
+
+const norm = (s) => String(s ?? "").trim().replace(/\s+/g, " ");
 const initials = (n) =>
   norm(n).split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
-function fmtDate(d, t) {
-  if (!d) return "Date TBD";
-  const dt = new Date(`${d}T${t || "00:00"}`);
-  if (isNaN(dt)) return d;
-  const day = dt.toLocaleDateString(undefined, {
+const hm = (d) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/** "Thu, Aug 6 · 19:00–21:00" — the end matters now that games expire. */
+function fmtWhen(poll) {
+  if (!poll.date) return "Date TBD";
+  const start = new Date(`${poll.date}T${poll.time || "00:00"}`);
+  if (isNaN(start)) return poll.date;
+  const day = start.toLocaleDateString(undefined, {
     weekday: "short", month: "short", day: "numeric",
   });
-  return t ? `${day} · ${t}` : day;
+  if (!poll.time) return day;
+  const end = new Date(start.getTime() + (poll.durationMin || 120) * 60000);
+  return `${day} · ${hm(start)}–${hm(end)}`;
 }
+
+const fmtClock = (ms) =>
+  new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
 /* ------------------------------------------------------------------ */
 
@@ -35,7 +67,7 @@ function Slot({ p, i }) {
       <span className={`pip ${p.skill}`}>{initials(p.name)}</span>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div className="pname">{p.name}</div>
-        <div className="psk">{skillOf(p.skill).label.slice(0, 3)}</div>
+        <div className="psk">{skillOf(p.skill).short}</div>
       </div>
     </div>
   );
@@ -89,9 +121,6 @@ const fmtFormat = (r) => {
   return r.teams.length === 2 ? `${size} v ${size}` : `${r.teams.length} × ${size}`;
 };
 
-const fmtClock = (ms) =>
-  new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-
 function Sides({ teams }) {
   return (
     <div className="teams">
@@ -142,7 +171,7 @@ function Bench({ bench }) {
   );
 }
 
-function Round({ round, n, current, admin, act, pollId, busy }) {
+function Round({ round, n, current, manage, act, pollId, busy }) {
   const head = (
     <div className="rhead">
       <span className="rnum mono">{String(n).padStart(2, "0")}</span>
@@ -152,7 +181,7 @@ function Round({ round, n, current, admin, act, pollId, busy }) {
       <span className="psk">{fmtClock(round.at)}</span>
       <span className="fmt mono">{fmtFormat(round)}</span>
       {current && <span className="pill live" style={{ marginLeft: "auto" }}>On court</span>}
-      {admin && (
+      {manage && (
         <button className="mini danger" disabled={busy}
           style={{ marginLeft: current ? 0 : "auto" }}
           onClick={() => act.undoRound(pollId, round.id)}>
@@ -188,7 +217,7 @@ function Round({ round, n, current, admin, act, pollId, busy }) {
         </span>
       </summary>
       <div style={{ paddingTop: 12 }}>
-        {admin && (
+        {manage && (
           <div className="bar" style={{ marginTop: 0, marginBottom: 12 }}>
             <button className="mini danger" disabled={busy}
               onClick={() => act.undoRound(pollId, round.id)}>Undo this round</button>
@@ -202,7 +231,133 @@ function Round({ round, n, current, admin, act, pollId, busy }) {
   );
 }
 
-function PollCard({ poll, admin, act, busy }) {
+/** The fields of a posted game, changeable after the fact. */
+function EditGame({ poll, act, busy }) {
+  const seed = () => ({
+    title: poll.title || "",
+    date: poll.date || "",
+    time: poll.time || "",
+    durationMin: poll.durationMin || 120,
+    location: poll.location || "",
+    notes: poll.notes || "",
+    cap: poll.cap,
+  });
+  const [f, setF] = useState(seed);
+  const [err, setErr] = useState("");
+  const [saved, setSaved] = useState(false);
+  const set = (k) => (e) => { setSaved(false); setF({ ...f, [k]: e.target.value }); };
+
+  const save = async () => {
+    const msg = await act.update(poll.id, {
+      title: norm(f.title),
+      date: f.date,
+      time: f.time,
+      durationMin: Number(f.durationMin),
+      location: f.location,
+      notes: f.notes,
+      cap: Number(f.cap),
+    });
+    setErr(msg || "");
+    setSaved(!msg);
+  };
+
+  return (
+    <details className="edit">
+      <summary>Edit game details</summary>
+      <div className="grid2" style={{ marginTop: 14 }}>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label htmlFor={`et${poll.id}`}>Game name</label>
+          <input id={`et${poll.id}`} value={f.title} onChange={set("title")} />
+        </div>
+        <div>
+          <label htmlFor={`ed${poll.id}`}>Date</label>
+          <input id={`ed${poll.id}`} type="date" value={f.date} onChange={set("date")} />
+        </div>
+        <div>
+          <label htmlFor={`ei${poll.id}`}>Start time</label>
+          <input id={`ei${poll.id}`} type="time" value={f.time} onChange={set("time")} />
+        </div>
+        <div>
+          <label htmlFor={`eu${poll.id}`}>How long</label>
+          <select id={`eu${poll.id}`} value={f.durationMin} onChange={set("durationMin")}>
+            {DURATIONS.map((d) => <option key={d.min} value={d.min}>{d.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label htmlFor={`el${poll.id}`}>Where</label>
+          <input id={`el${poll.id}`} value={f.location} onChange={set("location")} />
+        </div>
+        <div>
+          <label htmlFor={`ec${poll.id}`}>Player cap</label>
+          <input id={`ec${poll.id}`} type="number" min="2" max="60"
+            value={f.cap} onChange={set("cap")} />
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label htmlFor={`en${poll.id}`}>Description</label>
+          <input id={`en${poll.id}`} value={f.notes} onChange={set("notes")}
+            placeholder="Bring 400 HUF for court fee" />
+        </div>
+      </div>
+      {err && <div className="err">{err}</div>}
+      <div className="bar">
+        <button className="go" onClick={save} disabled={busy}>Save changes</button>
+        <button className="ghost" onClick={() => { setF(seed()); setErr(""); setSaved(false); }}
+          disabled={busy}>Reset</button>
+        {saved && <span className="okmsg">Saved.</span>}
+      </div>
+      <div className="note">
+        Changing the date, start time, or length also moves when the game clears
+        itself off the board — an hour after it finishes.
+      </div>
+    </details>
+  );
+}
+
+/** Anyone holding this game's passcode gets its controls. */
+function Unlock({ poll, act, busy }) {
+  const [open, setOpen] = useState(false);
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+
+  if (!open)
+    return (
+      <div className="bar">
+        <button className="ghost mini" onClick={() => setOpen(true)}>
+          I'm running this game
+        </button>
+      </div>
+    );
+
+  const go = async () => {
+    const msg = await act.unlock(poll.id, pw);
+    if (msg) return setErr(msg);
+    setPw("");
+    setOpen(false);
+  };
+
+  return (
+    <div className="sec">
+      <h3>Game passcode</h3>
+      <div className="grid2" style={{ marginTop: 10 }}>
+        <div>
+          <input type="password" value={pw} autoComplete="off" placeholder="Passcode"
+            onChange={(e) => setPw(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && go()} />
+        </div>
+        <div className="bar" style={{ marginTop: 0 }}>
+          <button className="go" onClick={go} disabled={busy}>Unlock</button>
+          <button className="ghost" onClick={() => { setOpen(false); setErr(""); }}>Cancel</button>
+        </div>
+      </div>
+      {err && <div className="err">{err}</div>}
+      <div className="note">
+        Whoever posted this game set this passcode. It runs this game only.
+      </div>
+    </div>
+  );
+}
+
+function PollCard({ poll, admin, hosting, act, busy }) {
   const [mixCount, setMixCount] = useState(2);
   // null = fit as many on court as possible; clamped so a shrinking roster
   // can't leave a stale, impossible side size selected.
@@ -210,6 +365,7 @@ function PollCard({ poll, admin, act, busy }) {
   const [dropName, setDropName] = useState("");
   const [dropMsg, setDropMsg] = useState("");
 
+  const manage = admin || hosting;
   const rounds = poll.rounds || [];
   const active = poll.rsvps.slice(0, poll.cap);
   const waitlist = poll.rsvps.slice(poll.cap);
@@ -218,6 +374,7 @@ function PollCard({ poll, admin, act, busy }) {
   const maxSide = Math.max(1, Math.floor(active.length / mixCount));
   const perSide = Math.min(sideSize ?? maxSide, maxSide);
   const benchCount = active.length - perSide * mixCount;
+  const finished = poll.endsAt != null && poll.endsAt < Date.now();
 
   const drop = async () => {
     const msg = await act.leave(poll.id, dropName);
@@ -226,18 +383,25 @@ function PollCard({ poll, admin, act, busy }) {
   };
 
   return (
-    <div className={`card ${poll.closed ? "closed" : ""}`}>
+    <div className={`card ${poll.closed || finished ? "closed" : ""}`}>
       <div className="rowline">
         <div style={{ flex: 1, minWidth: 220 }}>
-          <span className={`pill ${poll.closed ? "" : open ? "live" : "full"}`}>
-            {poll.closed ? "Closed" : open ? `${poll.cap - active.length} spots open` : "Roster full"}
+          <span className={`pill ${finished || poll.closed ? "" : open ? "live" : "full"}`}>
+            {finished ? "Played" : poll.closed ? "Closed" : open
+              ? `${poll.cap - active.length} spots open` : "Roster full"}
           </span>
+          {hosting && !admin && <span className="pill host">Your game</span>}
           <h2 style={{ marginTop: 10 }}>{poll.title}</h2>
           <div className="meta">
-            <span><b>{fmtDate(poll.date, poll.time)}</b></span>
+            <span><b>{fmtWhen(poll)}</b></span>
             <span>{poll.location || "Location TBD"}</span>
           </div>
           {poll.notes && <div className="note">{poll.notes}</div>}
+          {finished && (
+            <div className="note">
+              This one's over — it clears off the board an hour after it finished.
+            </div>
+          )}
         </div>
         <div style={{ textAlign: "right" }}>
           <div className="count">{active.length}<small>/{poll.cap}</small></div>
@@ -255,9 +419,9 @@ function PollCard({ poll, admin, act, busy }) {
         </div>
       </div>
       <div className="legend">
-        <span><i className="dot" style={{ background: "var(--flag)" }} />Advanced</span>
-        <span><i className="dot" style={{ background: "var(--sky)" }} />Intermediate</span>
-        <span><i className="dot" style={{ background: "var(--ball)" }} />Beginner</span>
+        {LADDER.map((s) => (
+          <span key={s.id}><i className={`dot ${s.id}`} />{s.label}</span>
+        ))}
       </div>
 
       {waitlist.length > 0 && (
@@ -269,7 +433,7 @@ function PollCard({ poll, admin, act, busy }) {
               <span className={`pip ${p.skill}`}>{initials(p.name)}</span>
               <span style={{ flex: 1 }}>{p.name}</span>
               <span className="psk">{skillOf(p.skill).label}</span>
-              {admin && (
+              {manage && (
                 <button className="mini danger" disabled={busy}
                   onClick={() => act.remove(poll.id, p.id)}>Remove</button>
               )}
@@ -296,9 +460,13 @@ function PollCard({ poll, admin, act, busy }) {
         </div>
       )}
 
-      {admin && (
+      {!manage && poll.hasHost && <Unlock poll={poll} act={act} busy={busy} />}
+
+      {manage && (
         <div className="sec" style={{ borderTop: "1px solid var(--line)", paddingTop: 18 }}>
-          <h3>Organizer controls</h3>
+          <h3>
+            {admin && !hosting ? "Admin controls" : "Organizer controls"}
+          </h3>
 
           {active.length >= 2 && (
             <div className="bar mixbar">
@@ -341,6 +509,8 @@ function PollCard({ poll, admin, act, busy }) {
             </div>
           )}
 
+          <EditGame poll={poll} act={act} busy={busy} />
+
           <div className="bar">
             <button className="ghost" disabled={busy}
               onClick={() => act.setClosed(poll.id, !poll.closed)}>
@@ -349,6 +519,11 @@ function PollCard({ poll, admin, act, busy }) {
             <button className="danger" disabled={busy} onClick={() => act.del(poll.id, poll.title)}>
               Delete game
             </button>
+            {hosting && (
+              <button className="ghost" disabled={busy} onClick={() => act.lock(poll.id)}>
+                Lock on this device
+              </button>
+            )}
           </div>
 
           {active.length > 0 && (
@@ -374,12 +549,12 @@ function PollCard({ poll, admin, act, busy }) {
           <div className="rounds">
             {[...rounds].reverse().map((r, i) => (
               <Round key={r.id} round={r} n={rounds.length - i} current={i === 0}
-                admin={admin} act={act} pollId={poll.id} busy={busy} />
+                manage={manage} act={act} pollId={poll.id} busy={busy} />
             ))}
           </div>
           <div className="note">
-            Beginner 1 · Intermediate 2 · Advanced 3. Each mix keeps the sides even on
-            points while pairing you with people you haven't played alongside yet.
+            {LADDER.map((s) => `${s.label} ${s.w}`).join(" · ")}. Each mix keeps the sides
+            even on points while pairing you with people you haven't played alongside yet.
           </div>
         </div>
       )}
@@ -387,25 +562,33 @@ function PollCard({ poll, admin, act, busy }) {
   );
 }
 
+/** Open to everyone — the passcode you set here is what runs your game. */
 function NewGame({ act, busy, onExit }) {
   const [f, setF] = useState({
-    title: "", date: "", time: "19:00", location: "", cap: 12, notes: "",
+    title: "", date: "", time: "19:00", durationMin: 120,
+    location: "", cap: 12, notes: "", hostPasscode: "",
   });
   const [err, setErr] = useState("");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   const create = async () => {
-    const msg = await act.create({ ...f, title: norm(f.title), cap: Number(f.cap) });
+    const msg = await act.create({
+      ...f,
+      title: norm(f.title),
+      cap: Number(f.cap),
+      durationMin: Number(f.durationMin),
+    });
     if (msg) return setErr(msg);
     setErr("");
-    setF({ ...f, title: "", location: "", notes: "" });
+    setF({ ...f, title: "", location: "", notes: "", hostPasscode: "" });
+    onExit();
   };
 
   return (
     <div className="card">
       <div className="rowline">
-        <h2>New game</h2>
-        <button className="ghost mini" onClick={onExit}>Sign out</button>
+        <h2>Post a game</h2>
+        <button className="ghost mini" onClick={onExit}>Cancel</button>
       </div>
       <div className="grid2" style={{ marginTop: 16 }}>
         <div style={{ gridColumn: "1 / -1" }}>
@@ -421,6 +604,12 @@ function NewGame({ act, busy, onExit }) {
           <input id="ti" type="time" value={f.time} onChange={set("time")} />
         </div>
         <div>
+          <label htmlFor="du">How long</label>
+          <select id="du" value={f.durationMin} onChange={set("durationMin")}>
+            {DURATIONS.map((d) => <option key={d.min} value={d.min}>{d.label}</option>)}
+          </select>
+        </div>
+        <div>
           <label htmlFor="l">Where</label>
           <input id="l" value={f.location} onChange={set("location")} placeholder="Gellért courts" />
         </div>
@@ -432,6 +621,15 @@ function NewGame({ act, busy, onExit }) {
           <label htmlFor="n">Anything players should know</label>
           <input id="n" value={f.notes} onChange={set("notes")}
             placeholder="Bring 400 HUF for court fee" />
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label htmlFor="hp">Your passcode for this game</label>
+          <input id="hp" type="password" value={f.hostPasscode} autoComplete="new-password"
+            onChange={set("hostPasscode")} placeholder="At least 4 characters" />
+          <div className="note">
+            This is what lets you edit the game and mix teams later, on any device.
+            Pick something you'll remember and share it with anyone helping you run it.
+          </div>
         </div>
       </div>
       {err && <div className="err">{err}</div>}
@@ -464,12 +662,13 @@ function SignIn({ onDone, onClose }) {
   return (
     <div className="card">
       <div className="rowline">
-        <h2>Organizer sign in</h2>
+        <h2>Admin sign in</h2>
         <button className="ghost mini" onClick={onClose}>Back</button>
       </div>
       <div className="note">
-        The passcode lives on the server, not in this page. It unlocks posting games,
-        editing rosters, and the team mixer.
+        The admin passcode lives on the server, not in this page. It opens every game
+        on the board, whoever posted it. To run a single game, use that game's own
+        passcode instead.
       </div>
       <div className="grid2" style={{ marginTop: 14 }}>
         <div>
@@ -495,17 +694,31 @@ export default function App() {
   const [state, setState] = useState(null);
   const [admin, setAdmin] = useState(false);
   const [gate, setGate] = useState(false);
+  const [posting, setPosting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fatal, setFatal] = useState("");
+  // Which games this browser holds the host passcode for. Mirrors
+  // localStorage so a change there re-renders the cards.
+  const [hosted, setHosted] = useState(() => new Set(Object.keys(hostKeys())));
 
-  const load = async () => {
+  const syncHosted = useCallback(() => setHosted(new Set(Object.keys(hostKeys()))), []);
+
+  const absorb = useCallback((next) => {
+    setState(next);
+    // Games get swept an hour after they end; their keys can go too.
+    pruneHostKeys(next.polls.map((p) => p.id));
+    syncHosted();
+    return next;
+  }, [syncHosted]);
+
+  const load = useCallback(async () => {
     try {
-      setState(await api.state());
+      absorb(await api.state());
       setFatal("");
     } catch (e) {
       setFatal("Can't reach the board right now. Check your connection and refresh.");
     }
-  };
+  }, [absorb]);
 
   useEffect(() => {
     load();
@@ -515,23 +728,52 @@ export default function App() {
     const onFocus = () => load();
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(t); window.removeEventListener("focus", onFocus); };
-  }, []);
+  }, [load]);
 
   /** Runs a call, folds the returned state in, and hands back an error string. */
-  const run = async (fn) => {
+  const run = useCallback(async (fn) => {
     setBusy(true);
     try {
-      setState(await fn());
+      absorb(await fn());
       return null;
     } catch (e) {
       return e.message;
     } finally {
       setBusy(false);
     }
-  };
+  }, [absorb]);
 
   const act = useMemo(() => ({
-    create: (poll) => run(() => api.createPoll(poll)),
+    create: async (poll) => {
+      setBusy(true);
+      try {
+        const next = await api.createPoll(poll);
+        // Whoever posts a game is holding its passcode by definition.
+        if (next.created) setHostKey(next.created, poll.hostPasscode);
+        absorb(next);
+        return null;
+      } catch (e) {
+        return e.message;
+      } finally {
+        setBusy(false);
+      }
+    },
+    unlock: async (id, passcode) => {
+      setBusy(true);
+      try {
+        await api.unlock(id, passcode);
+        setHostKey(id, passcode);
+        syncHosted();
+        return null;
+      } catch (e) {
+        return e.message;
+      } finally {
+        setBusy(false);
+      }
+    },
+    lock: (id) => { clearHostKey(id); syncHosted(); },
+
+    update: (id, patch) => run(() => api.updatePoll(id, patch)),
     join: (id, name, skill) => run(() => api.join(id, name, skill)),
     leave: (id, name) => run(() => api.leave(id, norm(name))),
     remove: (id, rsvpId) => run(() => api.remove(id, rsvpId)),
@@ -546,7 +788,7 @@ export default function App() {
       if (!window.confirm(`Delete "${title}" and every RSVP on it? This can't be undone.`)) return;
       return run(() => api.deletePoll(id));
     },
-  }), []);
+  }), [absorb, run, syncHosted]);
 
   const signOut = () => { clearKey(); setAdmin(false); };
 
@@ -569,14 +811,17 @@ export default function App() {
             <div className="tag">Volleyball · rosters &amp; waitlists</div>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 9 }}>
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
           <button className="ghost mini" onClick={load} disabled={busy}>
             {busy ? "Syncing…" : "Refresh"}
           </button>
+          {!posting && (
+            <button className="mini go" onClick={() => setPosting(true)}>Post a game</button>
+          )}
           {admin ? (
             <button className="mini" onClick={signOut}>Sign out</button>
           ) : (
-            <button className="mini" onClick={() => setGate(true)}>Organizer</button>
+            <button className="mini" onClick={() => setGate(true)}>Admin</button>
           )}
         </div>
       </header>
@@ -587,21 +832,23 @@ export default function App() {
         <SignIn onDone={() => { setAdmin(true); setGate(false); }} onClose={() => setGate(false)} />
       )}
 
-      {admin && <NewGame act={act} busy={busy} onExit={signOut} />}
+      {posting && <NewGame act={act} busy={busy} onExit={() => setPosting(false)} />}
 
       {state.polls.length === 0 ? (
         <div className="empty">
           <h2 style={{ marginBottom: 10 }}>No games on the board</h2>
-          The organizer posts a game here — then you grab a spot before it fills.
+          Post one yourself — set a passcode, share the link, and grab your spot.
         </div>
       ) : (
         state.polls.map((p) => (
-          <PollCard key={p.id} poll={p} admin={admin} act={act} busy={busy} />
+          <PollCard key={p.id} poll={p} admin={admin} hosting={hosted.has(p.id)}
+            act={act} busy={busy} />
         ))
       )}
 
       <div className="note" style={{ marginTop: 30 }}>
-        The board refreshes itself every 20 seconds, so rosters stay current without reloading.
+        The board refreshes itself every 20 seconds, so rosters stay current without
+        reloading. Games drop off the board an hour after they finish.
       </div>
     </div>
   );

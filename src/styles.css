@@ -1,6 +1,9 @@
 :root {
   --bg:#08192a; --surface:#0f2941; --raise:#16374f; --line:#23506b;
   --chalk:#eaf4f9; --dim:#8fb0c4; --ball:#ffc93c; --sky:#3fa9e0; --flag:#e4572e;
+  /* five skill rungs, walked around the hue wheel so neighbours never read
+     as the same colour: yellow - green - blue - violet - red */
+  --lime:#8fd06a; --violet:#9b7fe0;
   --net:#1a415c;
 }
 *,*::before,*::after{box-sizing:border-box}
@@ -43,7 +46,9 @@ h3{font-weight:800;font-size:14px;letter-spacing:.14em;color:var(--dim)}
   font-size:10.5px;font-weight:700;flex:none;color:#08192a;
   font-family:'JetBrains Mono',monospace}
 .pip.A{background:var(--flag);color:#fff}
+.pip.UI{background:var(--violet)}
 .pip.I{background:var(--sky)}
+.pip.BI{background:var(--lime)}
 .pip.B{background:var(--ball)}
 .pname{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;flex:1}
@@ -104,7 +109,13 @@ button.mini{padding:5px 9px;font-size:10px;letter-spacing:.08em}
 .sec{margin-top:22px}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:12px;
   letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+.legend span{white-space:nowrap}
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
+.dot.A{background:var(--flag)}
+.dot.UI{background:var(--violet)}
+.dot.I{background:var(--sky)}
+.dot.BI{background:var(--lime)}
+.dot.B{background:var(--ball)}
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
@@ -146,3 +157,19 @@ button.mini{padding:5px 9px;font-size:10px;letter-spacing:.08em}
 .mixnote strong{color:var(--chalk);font-family:'JetBrains Mono',monospace;font-weight:700}
 .fmt{font-size:11px;color:var(--sky);border:1px solid var(--line);border-radius:2px;
   padding:2px 7px;font-weight:700;flex:none}
+
+/* --- host controls ------------------------------------------------ */
+/* A game you hold the passcode for, versus one you're only signed up to. */
+.pill.host{border-color:var(--sky);color:var(--sky);margin-left:7px}
+.okmsg{font-size:12px;color:var(--lime);align-self:center;letter-spacing:.06em;
+  text-transform:uppercase;font-weight:700}
+
+.edit{margin-top:18px;border:1px solid var(--line);border-radius:3px;
+  padding:14px;background:var(--bg)}
+.edit > summary{cursor:pointer;list-style:none;font-size:11px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--dim);
+  display:flex;align-items:center}
+.edit > summary::-webkit-details-marker{display:none}
+.edit > summary::after{content:"▾";margin-left:auto;font-size:11px}
+.edit[open] > summary::after{content:"▴"}
+.edit > summary:hover{color:var(--ball)}

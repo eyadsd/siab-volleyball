@@ -173,3 +173,12 @@ button.mini{padding:5px 9px;font-size:10px;letter-spacing:.08em}
 .edit > summary::after{content:"▾";margin-left:auto;font-size:11px}
 .edit[open] > summary::after{content:"▴"}
 .edit > summary:hover{color:var(--ball)}
+
+/* Footer: the running note, with a way out to the changelog. */
+.note.foot{display:flex;justify-content:space-between;align-items:baseline;
+  gap:18px;flex-wrap:wrap}
+.note.foot span{flex:1;min-width:240px}
+.note.foot a{color:var(--ball);text-decoration:none;font-weight:700;
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  border-bottom:1px solid transparent;white-space:nowrap}
+.note.foot a:hover{border-bottom-color:var(--ball)}

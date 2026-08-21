@@ -846,9 +846,14 @@ export default function App() {
         ))
       )}
 
-      <div className="note" style={{ marginTop: 30 }}>
-        The board refreshes itself every 20 seconds, so rosters stay current without
-        reloading. Games drop off the board an hour after they finish.
+      <div className="note foot" style={{ marginTop: 30 }}>
+        <span>
+          The board refreshes itself every 20 seconds, so rosters stay current without
+          reloading. Games drop off the board an hour after they finish.
+        </span>
+        {/* Plain anchor, not a route: /whats-new is a static page, and the
+            SPA fallback would otherwise swallow it. */}
+        <a href="/whats-new">What's new</a>
       </div>
     </div>
   );

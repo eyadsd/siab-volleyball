@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>What's new — SIAB</title>
+  <meta name="description"
+        content="What changed on the SIAB volleyball board: five skill levels, anyone can post a game, editable details, and finished games clearing themselves." />
+  <meta name="theme-color" content="#08192a" />
+
+  <!-- Shared with the board so this reads as part of the same product. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800;900&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@500;700&display=swap"
+    rel="stylesheet" />
+
+<style>
+  /*
+   * SIAB's own palette, lifted from the app: a court at night.
+   * Deliberately single-theme, because the board itself is dark-only and a
+   * light variant would read as a different product.
+   */
+  :root {
+    --bg: #08192a;
+    --surface: #0f2941;
+    --line: #23506b;
+    --net: #1a415c;
+    --chalk: #eaf4f9;
+    --dim: #8fb0c4;
+    --faint: #6d94ab;
+
+    /* the five skill rungs, in order */
+    --ball: #ffc93c;
+    --lime: #8fd06a;
+    --sky: #3fa9e0;
+    --violet: #9b7fe0;
+    --flag: #e4572e;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--chalk);
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 {
+    font-family: 'Archivo', system-ui, sans-serif;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: -.02em;
+    line-height: .98;
+    text-wrap: balance;
+  }
+
+  .mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  a { color: var(--ball); }
+  a:focus-visible {
+    outline: 2px solid var(--ball);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 22px 90px; }
+
+  /* --- masthead ------------------------------------------------ */
+  /* The striped bar is a volleyball net antenna, same as the board's. */
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 38px 0 0;
+  }
+  .antenna {
+    width: 5px;
+    align-self: stretch;
+    min-height: 52px;
+    border-radius: 3px;
+    background: repeating-linear-gradient(180deg,
+      var(--flag) 0 10px, var(--chalk) 10px 20px);
+  }
+  .wordmark {
+    font-family: 'Archivo', system-ui, sans-serif;
+    font-weight: 900;
+    font-size: 34px;
+    letter-spacing: -.035em;
+    line-height: 1;
+  }
+  .wordmark a { color: inherit; text-decoration: none; }
+  .wordmark a:hover { color: var(--ball); }
+  .eyebrow {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-weight: 700;
+    margin-top: 7px;
+  }
+
+  /* --- hero ---------------------------------------------------- */
+  .hero {
+    margin-top: 44px;
+    padding: 30px 24px 34px;
+    border-top: 3px solid var(--chalk);
+    border-bottom: 3px solid var(--chalk);
+    background:
+      repeating-linear-gradient(90deg, transparent 0 15px, var(--net) 15px 16px),
+      repeating-linear-gradient(0deg, transparent 0 15px, var(--net) 15px 16px);
+  }
+  .hero h1 {
+    font-weight: 900;
+    font-size: clamp(33px, 7.4vw, 55px);
+    letter-spacing: -.035em;
+  }
+  .hero p {
+    margin: 18px 0 0;
+    color: var(--dim);
+    font-size: 17px;
+    max-width: 52ch;
+  }
+  .hero b { color: var(--chalk); font-weight: 500; }
+
+  /* --- audience groups ----------------------------------------- */
+  /* Split by who a change is for, because that's the real division:
+     half of this only matters if you're the one running the night. */
+  .group { margin-top: 52px; }
+  .grouphead {
+    display: flex;
+    align-items: baseline;
+    gap: 13px;
+    padding-bottom: 11px;
+    border-bottom: 2px solid var(--sky);
+    flex-wrap: wrap;
+  }
+  .grouphead h2 {
+    font-weight: 800;
+    font-size: clamp(17px, 3.2vw, 22px);
+    letter-spacing: .01em;
+  }
+  .groupnote { font-size: 12px; color: var(--faint); letter-spacing: .04em; }
+
+  .item {
+    margin-top: 26px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 22px;
+  }
+  .item h3 {
+    font-weight: 800;
+    font-size: 15px;
+    letter-spacing: .08em;
+    color: var(--ball);
+  }
+  .item p { margin: 13px 0 0; color: var(--chalk); }
+  .item p + p { margin-top: 11px; }
+  .item .aside { color: var(--dim); font-size: 14.5px; }
+
+  /* --- the skill ladder ---------------------------------------- */
+  /* Ordered low to high, because the whole change is that the scale
+     now has rungs in between. The ascending bars say that faster
+     than a sentence does. */
+  .ladder {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-top: 20px;
+    align-items: end;
+  }
+  .rung { text-align: center; }
+  .bar {
+    height: var(--h);
+    border-radius: 2px 2px 0 0;
+    background: var(--c);
+    opacity: .28;
+  }
+  .pip {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    margin: 9px auto 0;
+    display: grid;
+    place-items: center;
+    background: var(--c);
+    color: #08192a;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .pip.light { color: #fff; }
+  .rung .name {
+    display: block;
+    margin-top: 9px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--dim);
+    letter-spacing: .01em;
+  }
+  .rung.fresh .name { color: var(--chalk); font-weight: 700; }
+  .rung.fresh .bar { opacity: .62; }
+
+  .laddernote {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--faint);
+    text-align: center;
+    letter-spacing: .03em;
+  }
+  .laddernote .new { color: var(--chalk); font-weight: 700; }
+
+  /* --- housekeeping notice ------------------------------------- */
+  .notice {
+    margin-top: 52px;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--flag);
+    border-radius: 3px;
+    padding: 20px 22px;
+    background: var(--surface);
+  }
+  .notice h3 {
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: .12em;
+    color: var(--flag);
+  }
+  .notice p { margin: 12px 0 0; color: var(--dim); font-size: 15px; }
+  .notice b { color: var(--chalk); font-weight: 500; }
+
+  /* --- close --------------------------------------------------- */
+  .close {
+    margin-top: 46px;
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .close .go {
+    font-family: 'Archivo', system-ui, sans-serif;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: #08192a;
+    background: var(--ball);
+    border-radius: 3px;
+    padding: 12px 20px;
+    text-decoration: none;
+    transition: background .14s;
+  }
+  .close .go:hover { background: #ffd66b; }
+  .close .stamp {
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 700;
+  }
+
+  @media (max-width: 460px) {
+    .ladder { gap: 5px; }
+    .pip { width: 28px; height: 28px; font-size: 10px; }
+    .rung .name { font-size: 10px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="top">
+    <div class="antenna"></div>
+    <div>
+      <div class="wordmark"><a href="/">SIAB</a></div>
+      <div class="eyebrow">What's new · August 2026</div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>Anyone can run a game now</h1>
+    <p>
+      Four things changed on the board this week. The short version:
+      <b>you no longer need the organizer to post a game</b>, the skill picker
+      finally has an honest middle, and finished games stop piling up.
+    </p>
+  </section>
+
+  <section class="group">
+    <div class="grouphead">
+      <h2>If you just turn up and play</h2>
+      <span class="groupnote">two changes</span>
+    </div>
+
+    <article class="item">
+      <h3>Five skill levels, not three</h3>
+      <p>
+        Beginner, Intermediate and Advanced gave most people nothing honest to
+        pick. Nobody wants to call themselves the weakest player in the gym, and
+        nobody wants to over-claim either — so almost everyone chose
+        Intermediate, and the teams came out lopsided anyway.
+      </p>
+
+      <div class="ladder">
+        <div class="rung">
+          <div class="bar" style="--h: 22px; --c: var(--ball)"></div>
+          <div class="pip" style="--c: var(--ball)">1</div>
+          <span class="name">Beginner</span>
+        </div>
+        <div class="rung fresh">
+          <div class="bar" style="--h: 40px; --c: var(--lime)"></div>
+          <div class="pip" style="--c: var(--lime)">2</div>
+          <span class="name">Beginner-<wbr>intermediate</span>
+        </div>
+        <div class="rung">
+          <div class="bar" style="--h: 58px; --c: var(--sky)"></div>
+          <div class="pip" style="--c: var(--sky)">3</div>
+          <span class="name">Intermediate</span>
+        </div>
+        <div class="rung fresh">
+          <div class="bar" style="--h: 76px; --c: var(--violet)"></div>
+          <div class="pip light" style="--c: var(--violet)">4</div>
+          <span class="name">Upper-<wbr>intermediate</span>
+        </div>
+        <div class="rung">
+          <div class="bar" style="--h: 94px; --c: var(--flag)"></div>
+          <div class="pip light" style="--c: var(--flag)">5</div>
+          <span class="name">Advanced</span>
+        </div>
+      </div>
+      <p class="laddernote">
+        <span class="new">Two new rungs</span> in the gaps where everyone was already standing
+      </p>
+
+      <p class="aside">
+        Your existing sign-ups didn't change. If you picked Intermediate before,
+        you're still Intermediate — it just sits at 3 on a scale of 5 now, so the
+        team mixer has something real to work with.
+      </p>
+    </article>
+
+    <article class="item">
+      <h3>Finished games clear themselves</h3>
+      <p>
+        A game now disappears from the board an hour after it ends, taking its
+        roster and its rounds with it. No more scrolling past three weeks of
+        Fridays to find this one.
+      </p>
+      <p class="aside">
+        Games with no date set stay put until someone removes them.
+      </p>
+    </article>
+  </section>
+
+  <section class="group">
+    <div class="grouphead">
+      <h2>If you're the one organizing</h2>
+      <span class="groupnote">two changes</span>
+    </div>
+
+    <article class="item">
+      <h3>Post your own game, set your own passcode</h3>
+      <p>
+        You don't need the shared organizer passcode any more. Hit
+        <b>Post a game</b>, fill in the details, and choose a passcode for that
+        game while you're there.
+      </p>
+      <p>
+        That passcode is yours: it edits the game, mixes the teams, removes
+        players and closes the sign-ups — on your phone, your laptop, anywhere.
+        It does nothing to anyone else's game. Share it with whoever's helping
+        you run the night.
+      </p>
+      <p class="aside">
+        Opening a game someone else posted? Tap <b>I'm running this game</b> and
+        enter their passcode.
+      </p>
+    </article>
+
+    <article class="item">
+      <h3>Fix the details after you've posted</h3>
+      <p>
+        Court moved, start pushed back, someone dropped out and you want a
+        smaller cap — all editable now, under <b>Edit game details</b>. The name,
+        date, start time, length, place, player cap and description are all fair
+        game.
+      </p>
+      <p class="aside">
+        Rounds you've already mixed stay exactly as they were. They're a record
+        of what got played, so editing the game doesn't rewrite them. Changing
+        the date or time also moves when the game clears itself off the board.
+      </p>
+    </article>
+  </section>
+
+  <div class="notice">
+    <h3>One thing that already happened</h3>
+    <p>
+      Both <b>Friday Volleyball</b> games from 21 August had already finished when
+      the cleanup went live, so they were removed along with their rosters. The
+      board is empty and ready for the next one — post it whenever you like.
+    </p>
+  </div>
+
+  <div class="close">
+    <a class="go" href="/">Open the board</a>
+    <span class="stamp mono">SIAB · Updated 22 Aug 2026</span>
+  </div>
+
+</div>
+
+</body>
+</html>

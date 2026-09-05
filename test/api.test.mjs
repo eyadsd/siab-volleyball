@@ -330,6 +330,110 @@ t("an upcoming game is left alone", await onBoard(soon.created));
 await call(`/polls/${soon.created}`, { method: "DELETE", key: "hunter2" });
 
 
+// --- matchups: who won ---
+[s, st] = await j(await call("/polls", { method: "POST",
+  body: { title: "Result night", cap: 12, hostPasscode: HOST } }));
+const wid = st.created;
+for (let i = 0; i < 12; i++)
+  await call(`/polls/${wid}/rsvps`, { method: "POST",
+    body: { name: `Won${i}`, skill: ["B","BI","I","UI","A"][i % 5] } });
+
+// Two sides is one matchup; four sides is every pairing of the four.
+[s, st] = await j(await call(`/polls/${wid}/rounds`, { method: "POST", host: HOST,
+  body: { teamCount: 2, perTeam: 6 } }));
+let wr = st.polls.find(x => x.id === wid).rounds[0];
+t("two sides make one matchup", wr.matches.length === 1);
+t("the matchup names both sides", wr.matches[0].sideA === 0 && wr.matches[0].sideB === 1);
+t("a fresh matchup has no winner", wr.matches[0].winner === null);
+t("team snapshots stay on the server", wr.matches[0].teamA === undefined);
+
+await call(`/polls/${wid}/rounds`, { method: "DELETE", host: HOST });
+[s, st] = await j(await call(`/polls/${wid}/rounds`, { method: "POST", host: HOST,
+  body: { teamCount: 4, perTeam: 3 } }));
+wr = st.polls.find(x => x.id === wid).rounds[0];
+t("four sides make six matchups", wr.matches.length === 6);
+t("every pairing appears exactly once",
+  new Set(wr.matches.map(m => `${m.sideA}v${m.sideB}`)).size === 6);
+t("pairings are stored low side first", wr.matches.every(m => m.sideA < m.sideB));
+
+// Anyone can settle one nobody has recorded yet — the person walking off
+// court is rarely the person holding the passcode.
+const m0 = wr.matches[0];
+[s, st] = await j(await call(`/polls/${wid}/matches/${m0.id}`,
+  { method: "PUT", body: { winner: m0.sideB } }));
+let mNow = () => st.polls.find(x => x.id === wid).rounds[0].matches.find(m => m.id === m0.id);
+t("a stranger can record an undecided matchup", s === 200 && mNow().winner === m0.sideB);
+t("who recorded it is noted",
+  db.prepare("SELECT reported_by b FROM matches WHERE id=?").get(m0.id).b === "anyone");
+
+// But not overwrite one that's already down.
+[s] = await j(await call(`/polls/${wid}/matches/${m0.id}`,
+  { method: "PUT", body: { winner: m0.sideA } }));
+t("a stranger cannot overwrite a recorded result", s === 403);
+[s] = await j(await call(`/polls/${wid}/matches/${m0.id}`,
+  { method: "PUT", body: { winner: null } }));
+t("a stranger cannot clear a result", s === 403);
+
+[s, st] = await j(await call(`/polls/${wid}/matches/${m0.id}`,
+  { method: "PUT", host: HOST, body: { winner: m0.sideA } }));
+t("the game passcode overrides a recorded result", mNow().winner === m0.sideA);
+t("the override is attributed to the host",
+  db.prepare("SELECT reported_by b FROM matches WHERE id=?").get(m0.id).b === "host");
+
+[s, st] = await j(await call(`/polls/${wid}/matches/${m0.id}`,
+  { method: "PUT", key: "hunter2", body: { winner: null } }));
+t("admin can clear a result", mNow().winner === null);
+const cleared = db.prepare("SELECT reported_by b, decided_at d FROM matches WHERE id=?").get(m0.id);
+t("a cleared result forgets who reported it and when",
+  cleared.b === null && cleared.d === null);
+t("a cleared matchup is open to anyone again",
+  (await call(`/polls/${wid}/matches/${m0.id}`,
+    { method: "PUT", body: { winner: m0.sideA } })).status === 200);
+
+// A side that wasn't in this pairing can't have won it.
+[s] = await j(await call(`/polls/${wid}/matches/${m0.id}`,
+  { method: "PUT", host: HOST, body: { winner: 3 } }));
+t("a side outside the pairing is rejected", s === 400);
+[s] = await j(await call(`/polls/${wid}/matches/${m0.id}`,
+  { method: "PUT", host: HOST, body: {} }));
+t("a request with no winner field changes nothing", s === 400);
+[s] = await j(await call(`/polls/${wid}/matches/nosuchmatch`,
+  { method: "PUT", host: HOST, body: { winner: 0 } }));
+t("an unknown matchup 404s", s === 404);
+
+// Undoing a round says it didn't happen, so its results don't either.
+const wrid = wr.id;
+await call(`/polls/${wid}/rounds/${wrid}`, { method: "DELETE", host: HOST });
+t("undoing a round takes its matchups with it",
+  db.prepare("SELECT COUNT(*) c FROM matches WHERE round_id=?").get(wrid).c === 0);
+
+// Clearing the session does too, decided or not.
+[s, st] = await j(await call(`/polls/${wid}/rounds`, { method: "POST", host: HOST,
+  body: { teamCount: 2, perTeam: 6 } }));
+let cm = st.polls.find(x => x.id === wid).rounds[0].matches[0];
+await call(`/polls/${wid}/matches/${cm.id}`, { method: "PUT", body: { winner: cm.sideA } });
+await call(`/polls/${wid}/rounds`, { method: "DELETE", host: HOST });
+t("clearing the session drops even decided matchups",
+  db.prepare("SELECT COUNT(*) c FROM matches WHERE poll_id=?").get(wid).c === 0);
+
+// A played night has to leave something behind, so the sweep spares results.
+[s, st] = await j(await call(`/polls/${wid}/rounds`, { method: "POST", host: HOST,
+  body: { teamCount: 4, perTeam: 3 } }));
+const sm = st.polls.find(x => x.id === wid).rounds[0].matches;
+await call(`/polls/${wid}/matches/${sm[0].id}`, { method: "PUT", body: { winner: sm[0].sideA } });
+db.prepare("UPDATE polls SET ends_at=? WHERE id=?").run(Date.now() - 2 * 3600000, wid);
+[s, st] = await j(await call("/state"));
+t("the played game is swept off the board", !st.polls.some(x => x.id === wid));
+t("its recorded result survives the sweep",
+  db.prepare("SELECT COUNT(*) c FROM matches WHERE poll_id=?").get(wid).c === 1);
+t("the matchups nobody played are swept",
+  db.prepare("SELECT COUNT(*) c FROM matches WHERE poll_id=? AND winner IS NULL").get(wid).c === 0);
+t("a surviving result keeps its team snapshot",
+  JSON.parse(db.prepare("SELECT team_a a FROM matches WHERE poll_id=?").get(wid).a).length === 3);
+t("a surviving result is not served to the board once its game is gone",
+  !st.polls.some(x => x.rounds.some(r => r.matches.some(m => m.id === sm[0].id))));
+
+
 // --- closing ---
 [s, st] = await j(await call(`/polls/${id}`, { method: "PATCH", host: HOST, body: { closed: true } }));
 t("game closed", st.polls.find(x => x.id === id).closed === true);

@@ -107,5 +107,11 @@ export const api = {
     req(`/polls/${id}/rounds`, { method: "POST", pollId: id, body: { teamCount, perTeam } }),
   undoRound: (id, roundId) =>
     req(`/polls/${id}/rounds/${roundId}`, { method: "DELETE", pollId: id }),
+
+  // pollId is passed so the host key rides along when this browser has one.
+  // Anyone may settle an undecided matchup without it; the server is what
+  // decides whether you're allowed to overwrite one that's already down.
+  setWinner: (id, matchId, winner) =>
+    req(`/polls/${id}/matches/${matchId}`, { method: "PUT", pollId: id, body: { winner } }),
   clearRounds: (id) => req(`/polls/${id}/rounds`, { method: "DELETE", pollId: id }),
 };

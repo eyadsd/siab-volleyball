@@ -110,6 +110,12 @@ async function purgeExpired(env) {
 
   const marks = ids.map(() => "?").join(",");
   await env.DB.batch([
+    // Decided matchups outlive the game they were played in — they're the
+    // only record a finished night leaves behind. Undecided ones were never
+    // played, so they go with everything else.
+    env.DB.prepare(
+      `DELETE FROM matches WHERE winner IS NULL AND poll_id IN (${marks})`
+    ).bind(...ids),
     env.DB.prepare(`DELETE FROM rounds WHERE poll_id IN (${marks})`).bind(...ids),
     env.DB.prepare(`DELETE FROM rsvps  WHERE poll_id IN (${marks})`).bind(...ids),
     env.DB.prepare(`DELETE FROM polls  WHERE id      IN (${marks})`).bind(...ids),
@@ -118,7 +124,7 @@ async function purgeExpired(env) {
 
 /** Full board state: polls newest-relevant first, each with ordered RSVPs. */
 async function readState(env) {
-  const [polls, rsvps, rounds] = await Promise.all([
+  const [polls, rsvps, rounds, matches] = await Promise.all([
     env.DB.prepare(
       `SELECT id,title,date,time,location,cap,notes,closed,created_at,
               duration_min,ends_at,host_hash
@@ -131,12 +137,27 @@ async function readState(env) {
       `SELECT id,poll_id,team_count,teams,bench,gap,fresh_pairs,repeats,created_at
          FROM rounds ORDER BY seq ASC`
     ).all(),
+    // Matchups for games still on the board. The stored team snapshots are
+    // left behind on purpose — the client already has the same players in
+    // round.teams, and /state is polled every 20 seconds by every open tab.
+    env.DB.prepare(
+      `SELECT id,round_id,side_a,side_b,winner FROM matches
+        WHERE poll_id IN (SELECT id FROM polls) ORDER BY seq ASC`
+    ).all(),
   ]);
 
   const byPoll = new Map();
   for (const r of rsvps.results) {
     if (!byPoll.has(r.poll_id)) byPoll.set(r.poll_id, []);
     byPoll.get(r.poll_id).push({ id: r.id, name: r.name, skill: r.skill, at: r.created_at });
+  }
+
+  const matchesByRound = new Map();
+  for (const m of matches.results) {
+    if (!matchesByRound.has(m.round_id)) matchesByRound.set(m.round_id, []);
+    matchesByRound.get(m.round_id).push({
+      id: m.id, sideA: m.side_a, sideB: m.side_b, winner: m.winner,
+    });
   }
 
   // Oldest first, so index 0 is round 1.
@@ -151,6 +172,7 @@ async function readState(env) {
       gap: r.gap,
       freshPairs: r.fresh_pairs,
       repeats: r.repeats,
+      matches: matchesByRound.get(r.id) || [],
       at: r.created_at,
     });
   }
@@ -272,6 +294,9 @@ export default {
 
         if (method === "DELETE") {
           await env.DB.batch([
+            // Results that were actually recorded stand. Removing a game is
+            // housekeeping, not a claim that the volleyball never happened.
+            env.DB.prepare(`DELETE FROM matches WHERE poll_id=? AND winner IS NULL`).bind(id),
             env.DB.prepare(`DELETE FROM rounds WHERE poll_id=?`).bind(id),
             env.DB.prepare(`DELETE FROM rsvps WHERE poll_id=?`).bind(id),
             env.DB.prepare(`DELETE FROM polls WHERE id=?`).bind(id),
@@ -395,7 +420,12 @@ export default {
 
         // Wipe the whole session and start over.
         if (method === "DELETE") {
-          await env.DB.prepare(`DELETE FROM rounds WHERE poll_id=?`).bind(pollId).run();
+          // Starting the session over does say the rounds never happened, so
+          // their results go too — decided or not.
+          await env.DB.batch([
+            env.DB.prepare(`DELETE FROM matches WHERE poll_id=?`).bind(pollId),
+            env.DB.prepare(`DELETE FROM rounds WHERE poll_id=?`).bind(pollId),
+          ]);
           return ok(env);
         }
 
@@ -434,15 +464,43 @@ export default {
 
         const round = mixRound(roster.results, n, perTeam, history);
 
-        await env.DB.prepare(
-          `INSERT INTO rounds
-             (id,poll_id,team_count,teams,bench,gap,fresh_pairs,repeats,created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`
-        ).bind(
-          uid(), pollId, n,
-          JSON.stringify(round.teams), JSON.stringify(round.bench),
-          round.gap, round.freshPairs, round.repeats, Date.now()
-        ).run();
+        const roundId = uid();
+        const now = Date.now();
+
+        // Every pair of sides is a matchup waiting for a result: two sides
+        // make one, four make six. With more than two sides up you play each
+        // other side in turn rather than all at once, and there's no telling
+        // in advance how many of those you'll get through — so they're
+        // written undecided and are free to stay that way.
+        const matchups = [];
+        for (let i = 0; i < round.teams.length; i++) {
+          for (let j = i + 1; j < round.teams.length; j++) {
+            matchups.push(
+              env.DB.prepare(
+                `INSERT INTO matches
+                   (id,poll_id,round_id,side_a,side_b,winner,team_a,team_b,
+                    reported_by,created_at,decided_at)
+                 VALUES (?,?,?,?,?,NULL,?,?,NULL,?,NULL)`
+              ).bind(
+                uid(), pollId, roundId, i, j,
+                JSON.stringify(round.teams[i]), JSON.stringify(round.teams[j]), now
+              )
+            );
+          }
+        }
+
+        await env.DB.batch([
+          env.DB.prepare(
+            `INSERT INTO rounds
+               (id,poll_id,team_count,teams,bench,gap,fresh_pairs,repeats,created_at)
+             VALUES (?,?,?,?,?,?,?,?,?)`
+          ).bind(
+            roundId, pollId, n,
+            JSON.stringify(round.teams), JSON.stringify(round.bench),
+            round.gap, round.freshPairs, round.repeats, now
+          ),
+          ...matchups,
+        ]);
 
         return ok(env);
       }
@@ -457,6 +515,50 @@ export default {
         const res = await env.DB.prepare(`DELETE FROM rounds WHERE poll_id=? AND id=?`)
           .bind(oneRound[1], oneRound[2]).run();
         if (!res.meta.changes) return bad("That round is already gone.", 404);
+        // Undo means it didn't happen, so its results don't either.
+        await env.DB.prepare(`DELETE FROM matches WHERE round_id=?`).bind(oneRound[2]).run();
+        return ok(env);
+      }
+
+      /* ---- record who won a matchup ----------------------------- */
+      //
+      // Deliberately open at the front: anyone looking at the page can settle
+      // a matchup nobody has recorded yet, because whoever just finished
+      // playing is usually not whoever is holding the passcode. Changing or
+      // clearing a result that's already down needs the game's passcode —
+      // otherwise the last person to tap wins every argument.
+      const matchup = path.match(/^\/polls\/([\w-]+)\/matches\/([\w-]+)$/);
+      if (matchup && method === "PUT") {
+        const [, pollId, matchId] = matchup;
+        const poll = await getPoll(env, pollId);
+        if (!poll) return bad("That game is gone.", 404);
+
+        const match = await env.DB.prepare(
+          `SELECT id,side_a,side_b,winner FROM matches WHERE id=? AND poll_id=?`
+        ).bind(matchId, pollId).first();
+        if (!match) return bad("That matchup is gone.", 404);
+
+        if (!has(body, "winner")) return bad("Nothing to change.");
+        const winner = body.winner === null ? null : Number(body.winner);
+        if (winner !== null && winner !== match.side_a && winner !== match.side_b)
+          return bad("Pick one of the two sides that played.");
+
+        const manage = await canManage(request, env, poll);
+        if (!manage && match.winner !== null)
+          return bad("Someone already recorded this one. This game's passcode can change it.", 403);
+        if (!manage && winner === null)
+          return bad("Only whoever runs this game can clear a result.", 403);
+
+        const by = isAdmin(request, env) ? "admin" : manage ? "host" : "anyone";
+        await env.DB.prepare(
+          `UPDATE matches SET winner=?, reported_by=?, decided_at=? WHERE id=?`
+        ).bind(
+          winner,
+          winner === null ? null : by,
+          winner === null ? null : Date.now(),
+          matchId
+        ).run();
+
         return ok(env);
       }
 

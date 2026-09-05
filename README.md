@@ -12,6 +12,9 @@ into skill-balanced teams.
 - **Waitlist** promotion is automatic. Cancel a spot and the next person moves up.
 - **Rounds** — re-mix as many times as you like during a session. Each mix
   pairs people who haven't played together yet and rotates the bench.
+- **Results** — tap the side that won. Anyone can record a matchup nobody has
+  entered yet; the game's passcode is what changes one already down.
+- **Standings** — the night's record and medals, once any result is in.
 - **Housekeeping** — a game clears itself off the board an hour after it ends.
 
 Stack: React + Vite on the front, a single Cloudflare Worker on the back, D1
@@ -120,6 +123,55 @@ One honest limit: with a small roster of all-distinct levels there is sometimes
 exactly one balanced split, and the mixer will keep choosing it rather than
 unbalance the sides for variety's sake. That's the trade-off `GAP_WEIGHT` names.
 
+## Recording who won
+
+A mix lays out its matchups along with its teams: two sides is one matchup, four
+sides is all six pairings. With more than two sides up you play each other side
+in turn rather than all at once, and there's no telling in advance how many of
+those you'll get through — so every matchup starts blank, **nothing has to be
+filled in, and a blank one counts for nothing.** A night that got through three
+of its six pairings is recorded as three results, not as three losses.
+
+Tapping the side already marked as the winner clears it, which is the fastest
+way out of a mis-tap.
+
+### Who gets to say
+
+Two rules, and the split is the whole point:
+
+- **Anyone can settle a matchup nobody has recorded yet.** The person walking off
+  court is almost never the person holding the passcode, and routing every result
+  through one phone is how you end up with no results at all.
+- **Changing or clearing one that's already down takes the game's passcode**, or
+  the admin one. Without that rule the last person to tap wins every argument.
+
+The server decides this, not the browser — the buttons a stranger sees are live
+because the server would accept them, not the other way round.
+
+### What survives
+
+Rounds are already snapshots of who played on which side, and matchups store
+their own copy of the two sides for the same reason: a player leaving the roster
+later must not rewrite a result they were part of.
+
+That snapshot is also what lets a result outlive the game. When the sweep clears
+a finished game an hour after it ends, **recorded results stay and unplayed
+pairings go.** A night that was actually played has to leave something behind —
+it's what the rating work builds on next. Undoing a round or clearing the session
+is different: that's a claim the rounds never happened, so their results go too,
+recorded or not.
+
+## Standings
+
+Once any result is in, the session grows a *Tonight* board: everyone who played,
+their win-loss record, and 🥇🥈🥉 on the top three. Ties share a medal, because
+they did the same thing, and a player with no wins gets none.
+
+It's counted in the browser straight off the rounds already on screen — no extra
+request, no stored totals to drift out of step with the results they came from.
+Because it reads the round snapshots rather than the current roster, someone who
+had to leave early still keeps the games they won.
+
 ## Editing a game
 
 Anything you set when posting a game can be changed afterwards by whoever holds
@@ -203,7 +255,15 @@ npx wrangler d1 execute siab-db --remote --file=./migrations/001_rounds.sql
 
 # per-game passcodes and automatic expiry
 npx wrangler d1 execute siab-db --remote --file=./migrations/002_hosts_and_expiry.sql
+
+# recording who won
+npx wrangler d1 execute siab-db --remote --file=./migrations/004_matches.sql
 ```
+
+`004` only creates a table, so unlike `002` it is safe to run twice. Rounds that
+already exist get no matchups — mix a fresh round to start recording results.
+Backfilling pairings onto rounds already played would invent matches nobody
+agreed to.
 
 `002` is not re-runnable — SQLite has no `ADD COLUMN IF NOT EXISTS`, so a second
 run fails on a duplicate column. That failure means it already ran.
@@ -295,7 +355,7 @@ cp .dev.vars.example .dev.vars     # then edit the passcode inside
 npm test
 ```
 
-120 checks, no test framework and no network.
+146 checks, no test framework and no network.
 
 `test/balance.test.mjs` verifies the mixer against the theoretical minimum
 pairing overlap rather than a guessed threshold — for two sides of six, round 2
@@ -314,6 +374,15 @@ hash differently, that passcodes are never stored or served in the clear, that
 admin overrides a game it didn't create, that a partial edit leaves untouched
 fields alone, and the expiry sweep on both sides of the grace hour — including
 that a date-TBD game is never swept.
+
+Results get their own run: that two sides make one matchup and four make six with
+every pairing exactly once, that a stranger can settle an undecided matchup but
+is refused on one already recorded, that the game passcode and the admin passcode
+each override it, that a cleared matchup is open to anyone again, that a side
+outside the pairing is rejected, and that team snapshots never reach the browser.
+The asymmetry in what survives is tested from both directions: undoing a round
+takes its results with it, while the expiry sweep keeps the recorded ones —
+snapshot intact — and drops only the pairings nobody played.
 
 Fixtures are scheduled relative to `Date.now()`, not pinned to literal dates.
 Now that games expire, a hard-coded date would have quietly started failing the

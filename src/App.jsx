@@ -146,6 +146,130 @@ function Sides({ teams }) {
   );
 }
 
+const sideName = (i) => `Side ${String.fromCharCode(65 + i)}`;
+
+/**
+ * One row per pairing of sides. Two sides make one matchup, four make six,
+ * and nobody plays six matches in an evening — so every one of them starts
+ * blank and a blank one simply doesn't count. Fill in what you got through.
+ *
+ * The buttons are live for everyone while a matchup is undecided, because
+ * the person who just walked off court is rarely the person holding the
+ * passcode. Once a result is down it takes the passcode to change it.
+ */
+function Matchups({ round, manage, act, pollId, busy }) {
+  const [err, setErr] = useState("");
+  const list = round.matches || [];
+  if (!list.length) return null;
+
+  const tap = async (m, side) => {
+    setErr("");
+    // Tapping the side that already won clears it — the fastest way to undo
+    // a mis-tap, and the same gate applies either way.
+    const msg = await act.setWinner(pollId, m.id, m.winner === side ? null : side);
+    if (msg) setErr(msg);
+  };
+
+  return (
+    <div className="mups">
+      {list.map((m) => {
+        const locked = m.winner !== null && !manage;
+        return (
+          <div className={`mup${m.winner !== null ? " done" : ""}`} key={m.id}>
+            {[m.sideA, m.sideB].map((side, k) => (
+              <React.Fragment key={side}>
+                {k === 1 && <span className="mvs psk">v</span>}
+                <button
+                  className={`mini won${m.winner === side ? " win" : ""}`}
+                  disabled={busy || locked}
+                  title={
+                    locked
+                      ? "This game's passcode can change a recorded result."
+                      : m.winner === side
+                        ? `Clear — ${sideName(side)} didn't win after all`
+                        : `${sideName(side)} won`
+                  }
+                  onClick={() => tap(m, side)}
+                >
+                  {sideName(side)}
+                </button>
+              </React.Fragment>
+            ))}
+            <span className="psk mupnote">
+              {m.winner === null ? "not played yet" : `${sideName(m.winner)} won`}
+            </span>
+          </div>
+        );
+      })}
+      {err && <div className="err">{err}</div>}
+    </div>
+  );
+}
+
+/**
+ * The night's standings, counted straight off the recorded matchups. Rounds
+ * carry their own snapshot of who was on which side, so this stays right
+ * even for someone who has since left the roster.
+ */
+function tally(rounds) {
+  const by = new Map();
+  for (const r of rounds) {
+    for (const m of r.matches || []) {
+      if (m.winner === null || m.winner === undefined) continue;
+      const loser = m.winner === m.sideA ? m.sideB : m.sideA;
+      for (const [side, key] of [[m.winner, "w"], [loser, "l"]]) {
+        for (const p of r.teams[side] || []) {
+          if (!by.has(p.id)) by.set(p.id, { id: p.id, name: p.name, skill: p.skill, w: 0, l: 0 });
+          by.get(p.id)[key]++;
+        }
+      }
+    }
+  }
+  return [...by.values()].sort(
+    (a, b) => b.w - a.w || a.l - b.l || a.name.localeCompare(b.name)
+  );
+}
+
+/** Ties share a medal, because they did the same thing. */
+const MEDALS = ["🥇", "🥈", "🥉"];
+function medals(rows) {
+  const out = [];
+  let rank = 0;
+  rows.forEach((r, i) => {
+    if (i > 0 && (r.w !== rows[i - 1].w || r.l !== rows[i - 1].l)) rank = i;
+    out.push(rank < MEDALS.length && r.w > 0 ? MEDALS[rank] : "");
+  });
+  return out;
+}
+
+function Leaderboard({ rounds }) {
+  const rows = tally(rounds);
+  if (!rows.length) return null;
+  const badges = medals(rows);
+  const played = rounds.reduce(
+    (n, r) => n + (r.matches || []).filter((m) => m.winner !== null).length, 0
+  );
+
+  return (
+    <div className="lb">
+      <div className="lbhead">
+        <strong style={{ fontFamily: "Archivo", letterSpacing: ".1em", fontSize: 13 }}>
+          TONIGHT
+        </strong>
+        <span className="psk">{played} {played === 1 ? "matchup" : "matchups"} recorded</span>
+      </div>
+      {rows.map((r, i) => (
+        <div className="lbrow" key={r.id}>
+          <span className="medal">{badges[i] || <span className="mono psk">{i + 1}</span>}</span>
+          <span className={`pip ${r.skill}`}>{initials(r.name)}</span>
+          <span style={{ flex: 1 }}>{r.name}</span>
+          <span className="mono psk">{r.w}–{r.l}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function RoundStats({ round }) {
   return (
     <div className="rstats">
@@ -197,6 +321,7 @@ function Round({ round, n, current, manage, act, pollId, busy }) {
       <div className="round current">
         {head}
         <Sides teams={round.teams} />
+        <Matchups round={round} manage={manage} act={act} pollId={pollId} busy={busy} />
         <Bench bench={round.bench} />
         <RoundStats round={round} />
       </div>
@@ -224,6 +349,7 @@ function Round({ round, n, current, manage, act, pollId, busy }) {
           </div>
         )}
         <Sides teams={round.teams} />
+        <Matchups round={round} manage={manage} act={act} pollId={pollId} busy={busy} />
         <Bench bench={round.bench} />
         <RoundStats round={round} />
       </div>
@@ -546,6 +672,7 @@ function PollCard({ poll, admin, hosting, act, busy }) {
       {rounds.length > 0 && (
         <div className="sec">
           <h3>Session · {rounds.length} {rounds.length === 1 ? "round" : "rounds"} played</h3>
+          <Leaderboard rounds={rounds} />
           <div className="rounds">
             {[...rounds].reverse().map((r, i) => (
               <Round key={r.id} round={r} n={rounds.length - i} current={i === 0}
@@ -780,6 +907,7 @@ export default function App() {
     setClosed: (id, closed) => run(() => api.setClosed(id, closed)),
     mixRound: (id, n, perTeam) => run(() => api.mixRound(id, n, perTeam)),
     undoRound: (id, roundId) => run(() => api.undoRound(id, roundId)),
+    setWinner: (id, matchId, winner) => run(() => api.setWinner(id, matchId, winner)),
     clearRounds: (id, title) => {
       if (!window.confirm(`Clear every round played for "${title}"? The next mix starts from scratch.`)) return;
       return run(() => api.clearRounds(id));

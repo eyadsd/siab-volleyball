@@ -62,3 +62,31 @@ CREATE TABLE IF NOT EXISTS rounds (
 );
 
 CREATE INDEX IF NOT EXISTS rounds_order ON rounds(poll_id, seq);
+
+-- One row per pairing inside a round. Two sides make one matchup; four sides
+-- make six, because with several sides up you play each other side in turn
+-- rather than all at once. winner NULL means "not recorded" and is ignored
+-- everywhere — you are never required to fill them all in, and a night that
+-- only got through half its pairings still counts for the half it played.
+--
+-- team_a and team_b are snapshots for the same reason rounds.teams is one: a
+-- player leaving later must not rewrite a result. They also let a decided
+-- matchup outlive the poll, which the expiry sweep deletes an hour after the
+-- game ends. A played night has to leave something behind.
+CREATE TABLE IF NOT EXISTS matches (
+  seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          TEXT NOT NULL UNIQUE,
+  poll_id     TEXT NOT NULL,
+  round_id    TEXT NOT NULL,
+  side_a      INTEGER NOT NULL,   -- team index within the round
+  side_b      INTEGER NOT NULL,   -- always greater than side_a, so a pairing appears once
+  winner      INTEGER,            -- side_a | side_b | NULL
+  team_a      TEXT NOT NULL,      -- JSON: [{id,name,skill}]
+  team_b      TEXT NOT NULL,
+  reported_by TEXT,               -- 'anyone' | 'host' | 'admin'
+  created_at  INTEGER NOT NULL,
+  decided_at  INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS matches_round ON matches(round_id);
+CREATE INDEX IF NOT EXISTS matches_poll  ON matches(poll_id, seq);

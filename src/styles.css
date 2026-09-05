@@ -145,6 +145,28 @@ button.mini{padding:5px 9px;font-size:10px;letter-spacing:.08em}
 .benchp{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--dim)}
 .benchp .pip{opacity:.55}
 
+/* Matchups — one row per pairing of sides. A pairing nobody played stays
+   dim; the winner lights up in ball yellow. */
+.mups{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.mup{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:7px 9px;border:1px solid var(--line);border-radius:3px;background:var(--surface)}
+.mup.done{border-color:var(--net);background:var(--bg)}
+.mvs{font-size:10px;opacity:.6}
+.mupnote{margin-left:auto;font-size:10px}
+button.won{background:var(--raise);border-color:var(--line);color:var(--dim)}
+button.won:hover:not(:disabled){border-color:var(--ball);color:var(--chalk)}
+button.won.win{background:var(--ball);border-color:var(--ball);color:#08192a;font-weight:700}
+button.won.win:disabled{opacity:1}
+
+/* Tonight's standings, counted off the recorded matchups. */
+.lb{border:1px solid var(--line);border-radius:3px;background:var(--bg);
+  padding:12px 14px;margin-bottom:14px}
+.lbhead{display:flex;align-items:center;gap:11px;margin-bottom:9px}
+.lbhead .psk{margin-left:auto}
+.lbrow{display:flex;align-items:center;gap:10px;padding:4px 0}
+.lbrow + .lbrow{border-top:1px solid var(--net)}
+.medal{width:26px;text-align:center;font-size:18px;line-height:1;flex:none}
+
 .rstats{display:flex;gap:16px;flex-wrap:wrap;margin-top:11px;font-size:11px;
   color:var(--dim);letter-spacing:.06em;text-transform:uppercase;font-weight:700}
 .rstats span:not(:last-child)::after{content:" ·";margin-left:16px;color:var(--line)}

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>What's new — SIAB</title>
   <meta name="description"
-        content="What changed on the SIAB volleyball board: five skill levels, anyone can post a game, editable details, and finished games clearing themselves." />
+        content="What changed on the SIAB volleyball board: record who won each matchup, and standings with medals at the end of the night." />
   <meta name="theme-color" content="#08192a" />
 
   <!-- Shared with the board so this reads as part of the same product. -->
@@ -24,6 +24,7 @@
   :root {
     --bg: #08192a;
     --surface: #0f2941;
+    --raise: #16374f;
     --line: #23506b;
     --net: #1a415c;
     --chalk: #eaf4f9;
@@ -132,9 +133,7 @@
   }
   .hero b { color: var(--chalk); font-weight: 500; }
 
-  /* --- audience groups ----------------------------------------- */
-  /* Split by who a change is for, because that's the real division:
-     half of this only matters if you're the one running the night. */
+  /* --- groups -------------------------------------------------- */
   .group { margin-top: 52px; }
   .grouphead {
     display: flex;
@@ -167,58 +166,152 @@
   .item p { margin: 13px 0 0; color: var(--chalk); }
   .item p + p { margin-top: 11px; }
   .item .aside { color: var(--dim); font-size: 14.5px; }
+  .item .aside b { color: var(--chalk); font-weight: 500; }
 
-  /* --- the skill ladder ---------------------------------------- */
-  /* Ordered low to high, because the whole change is that the scale
-     now has rungs in between. The ascending bars say that faster
-     than a sentence does. */
-  .ladder {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 8px;
+  /* --- mock-ups of the real thing ------------------------------ */
+  /* Screenshots would go stale and wouldn't survive a palette change.
+     These are the actual components rebuilt in flat markup, which is
+     cheaper to keep honest than an image is. */
+  .mock {
     margin-top: 20px;
-    align-items: end;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 14px;
   }
-  .rung { text-align: center; }
-  .bar {
-    height: var(--h);
-    border-radius: 2px 2px 0 0;
-    background: var(--c);
-    opacity: .28;
-  }
-  .pip {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    margin: 9px auto 0;
-    display: grid;
-    place-items: center;
-    background: var(--c);
-    color: #08192a;
+  .mocklabel {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 12px;
-    font-weight: 700;
-  }
-  .pip.light { color: #fff; }
-  .rung .name {
-    display: block;
-    margin-top: 9px;
-    font-size: 11px;
-    line-height: 1.35;
-    color: var(--dim);
-    letter-spacing: .01em;
-  }
-  .rung.fresh .name { color: var(--chalk); font-weight: 700; }
-  .rung.fresh .bar { opacity: .62; }
-
-  .laddernote {
-    margin-top: 16px;
-    font-size: 13px;
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
     color: var(--faint);
-    text-align: center;
-    letter-spacing: .03em;
+    font-weight: 700;
+    margin-bottom: 11px;
   }
-  .laddernote .new { color: var(--chalk); font-weight: 700; }
+
+  /* one matchup: two sides, maybe a winner, a note */
+  .mrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface);
+  }
+  .mrow + .mrow { margin-top: 6px; }
+  .mrow.done { background: var(--bg); border-color: var(--net); }
+  .side {
+    font-family: 'Archivo', system-ui, sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 5px 9px;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    background: var(--raise);
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .side.win {
+    background: var(--ball);
+    border-color: var(--ball);
+    color: #08192a;
+  }
+  .side.lost { opacity: .4; }
+  .vs { font-size: 10px; color: var(--faint); letter-spacing: .1em; }
+  .mnote {
+    margin-left: auto;
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .mnote.blank { color: var(--faint); }
+
+  /* the standings block */
+  .lbrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 0;
+    font-size: 14px;
+  }
+  .lbrow + .lbrow { border-top: 1px solid var(--net); }
+  .medal {
+    width: 26px;
+    text-align: center;
+    font-size: 18px;
+    line-height: 1;
+    flex: none;
+  }
+  .medal.num {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .who { flex: 1; }
+  .rec {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--dim);
+    letter-spacing: .06em;
+  }
+
+  /* --- who can do what ----------------------------------------- */
+  /* The one rule here with a real edge to it, so it gets its own
+     shape rather than another paragraph. */
+  .rules { margin-top: 20px; display: grid; gap: 10px; }
+  .rule {
+    display: flex;
+    gap: 13px;
+    align-items: flex-start;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--lime);
+    border-radius: 3px;
+    padding: 13px 15px;
+  }
+  .rule.gated { border-left-color: var(--ball); }
+  .rule .who2 {
+    font-family: 'Archivo', system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--chalk);
+    flex: none;
+    width: 96px;
+    padding-top: 2px;
+  }
+  .rule p { margin: 0; font-size: 14.5px; color: var(--dim); }
+  .rule p b { color: var(--chalk); font-weight: 500; }
+
+  /* --- earlier changes ----------------------------------------- */
+  /* Kept rather than replaced — it's a changelog — but compressed.
+     Anyone who cared about the August detail has read it by now. */
+  .earlier { margin-top: 22px; }
+  .eitem {
+    display: flex;
+    gap: 14px;
+    align-items: baseline;
+    padding: 13px 2px;
+    border-bottom: 1px solid var(--net);
+  }
+  .eitem:first-child { border-top: 1px solid var(--net); }
+  .eitem .ename {
+    font-family: 'Archivo', system-ui, sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--chalk);
+    flex: none;
+    width: 172px;
+  }
+  .eitem p { margin: 0; font-size: 14.5px; color: var(--dim); }
 
   /* --- close --------------------------------------------------- */
   .close {
@@ -253,10 +346,11 @@
     font-weight: 700;
   }
 
-  @media (max-width: 460px) {
-    .ladder { gap: 5px; }
-    .pip { width: 28px; height: 28px; font-size: 10px; }
-    .rung .name { font-size: 10px; }
+  @media (max-width: 520px) {
+    .rule { flex-direction: column; gap: 6px; }
+    .rule .who2 { width: auto; }
+    .eitem { flex-direction: column; gap: 4px; }
+    .eitem .ename { width: auto; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -272,129 +366,177 @@
     <div class="antenna"></div>
     <div>
       <div class="wordmark"><a href="/">SIAB</a></div>
-      <div class="eyebrow">What's new · August 2026</div>
+      <div class="eyebrow">What's new · September 2026</div>
     </div>
   </header>
 
   <section class="hero">
-    <h1>Anyone can run a game now</h1>
+    <h1>The board keeps score now</h1>
     <p>
-      Four things changed on the board this week. The short version:
-      <b>you no longer need the organizer to post a game</b>, the skill picker
-      finally has an honest middle, and finished games stop piling up.
+      Until now the board recorded who played with whom and stopped there. It
+      now also records <b>who won</b> — and puts up the night's standings when
+      you're done. Everything else works exactly as it did.
     </p>
   </section>
 
   <section class="group">
     <div class="grouphead">
-      <h2>If you just turn up and play</h2>
-      <span class="groupnote">two changes</span>
+      <h2>New this month</h2>
+      <span class="groupnote">three changes</span>
     </div>
 
     <article class="item">
-      <h3>Five skill levels, not three</h3>
+      <h3>Tap the side that won</h3>
       <p>
-        Beginner, Intermediate and Advanced gave most people nothing honest to
-        pick. Nobody wants to call themselves the weakest player in the gym, and
-        nobody wants to over-claim either — so almost everyone chose
-        Intermediate, and the teams came out lopsided anyway.
+        Every mix now lists its matchups underneath the teams. Two sides is one
+        matchup. Four sides is all six pairings, because with several sides up
+        you play each other side in turn rather than all at once.
       </p>
 
-      <div class="ladder">
-        <div class="rung">
-          <div class="bar" style="--h: 22px; --c: var(--ball)"></div>
-          <div class="pip" style="--c: var(--ball)">1</div>
-          <span class="name">Beginner</span>
+      <div class="mock">
+        <div class="mocklabel">Round 2 · four sides of three</div>
+        <div class="mrow done">
+          <span class="side win">Side A</span><span class="vs">v</span><span class="side lost">Side B</span>
+          <span class="mnote">Side A won</span>
         </div>
-        <div class="rung fresh">
-          <div class="bar" style="--h: 40px; --c: var(--lime)"></div>
-          <div class="pip" style="--c: var(--lime)">2</div>
-          <span class="name">Beginner-<wbr>intermediate</span>
+        <div class="mrow done">
+          <span class="side win">Side A</span><span class="vs">v</span><span class="side lost">Side C</span>
+          <span class="mnote">Side A won</span>
         </div>
-        <div class="rung">
-          <div class="bar" style="--h: 58px; --c: var(--sky)"></div>
-          <div class="pip" style="--c: var(--sky)">3</div>
-          <span class="name">Intermediate</span>
+        <div class="mrow done">
+          <span class="side lost">Side B</span><span class="vs">v</span><span class="side win">Side D</span>
+          <span class="mnote">Side D won</span>
         </div>
-        <div class="rung fresh">
-          <div class="bar" style="--h: 76px; --c: var(--violet)"></div>
-          <div class="pip light" style="--c: var(--violet)">4</div>
-          <span class="name">Upper-<wbr>intermediate</span>
+        <div class="mrow">
+          <span class="side">Side A</span><span class="vs">v</span><span class="side">Side D</span>
+          <span class="mnote blank">Not played yet</span>
         </div>
-        <div class="rung">
-          <div class="bar" style="--h: 94px; --c: var(--flag)"></div>
-          <div class="pip light" style="--c: var(--flag)">5</div>
-          <span class="name">Advanced</span>
+        <div class="mrow">
+          <span class="side">Side B</span><span class="vs">v</span><span class="side">Side C</span>
+          <span class="mnote blank">Not played yet</span>
+        </div>
+        <div class="mrow">
+          <span class="side">Side C</span><span class="vs">v</span><span class="side">Side D</span>
+          <span class="mnote blank">Not played yet</span>
         </div>
       </div>
-      <p class="laddernote">
-        <span class="new">Two new rungs</span> in the gaps where everyone was already standing
-      </p>
 
       <p class="aside">
-        Your existing sign-ups didn't change. If you picked Intermediate before,
-        you're still Intermediate — it just sits at 3 on a scale of 5 now, so the
-        team mixer has something real to work with.
+        <b>Nothing has to be filled in.</b> A pairing you never got around to
+        playing just stays blank, and blank pairings count for nothing — the
+        night above is recorded as three results, not as three losses. Tapping a
+        side that's already marked as the winner clears it, which is the
+        quickest way out of a mis-tap.
       </p>
     </article>
 
     <article class="item">
-      <h3>Finished games clear themselves</h3>
+      <h3>Who gets to say who won</h3>
       <p>
-        A game now disappears from the board an hour after it ends, taking its
-        roster and its rounds with it. No more scrolling past three weeks of
-        Fridays to find this one.
+        Whoever just walked off court is almost never whoever is holding the
+        passcode, and making the gym wait for one phone was never going to work.
+        So the two halves of this are split on purpose:
       </p>
+
+      <div class="rules">
+        <div class="rule">
+          <span class="who2">Anyone</span>
+          <p>
+            Can settle a matchup <b>nobody has recorded yet</b>. No passcode, no
+            account, no waiting for the organizer.
+          </p>
+        </div>
+        <div class="rule gated">
+          <span class="who2">The passcode</span>
+          <p>
+            Is what it takes to <b>change or clear a result already down</b>.
+            Without that rule, the last person to tap wins every argument.
+          </p>
+        </div>
+      </div>
+
       <p class="aside">
-        Games with no date set stay put until someone removes them.
+        The server enforces this, not your phone — so a result you recorded
+        can't be quietly rewritten by whoever opens the page next.
+      </p>
+    </article>
+
+    <article class="item">
+      <h3>Standings when the night's over</h3>
+      <p>
+        Once any result is in, the session grows a <b>Tonight</b> board:
+        everyone who played, their record, and 🥇 🥈 🥉 across the top three. It
+        counts every round of the session, not just the last one.
+      </p>
+
+      <div class="mock">
+        <div class="mocklabel">Tonight · 4 matchups recorded</div>
+        <div class="lbrow">
+          <span class="medal">🥇</span><span class="who">David Horvath</span><span class="rec">4–0</span>
+        </div>
+        <div class="lbrow">
+          <span class="medal">🥇</span><span class="who">Hanna Varga</span><span class="rec">4–0</span>
+        </div>
+        <div class="lbrow">
+          <span class="medal">🥉</span><span class="who">Bence Toth</span><span class="rec">3–1</span>
+        </div>
+        <div class="lbrow">
+          <span class="medal num">4</span><span class="who">Anna Kovacs</span><span class="rec">1–1</span>
+        </div>
+        <div class="lbrow">
+          <span class="medal num">5</span><span class="who">Judit Meszaros</span><span class="rec">1–1</span>
+        </div>
+      </div>
+
+      <p class="aside">
+        People who tie share a medal, which is why there are two golds and no
+        silver up there. And it reads the rounds as they were actually played,
+        so if you had to leave early you keep the games you won.
       </p>
     </article>
   </section>
 
   <section class="group">
     <div class="grouphead">
-      <h2>If you're the one organizing</h2>
-      <span class="groupnote">two changes</span>
+      <h2>Earlier</h2>
+      <span class="groupnote">August 2026</span>
     </div>
 
-    <article class="item">
-      <h3>Post your own game, set your own passcode</h3>
-      <p>
-        You don't need the shared organizer passcode any more. Hit
-        <b>Post a game</b>, fill in the details, and choose a passcode for that
-        game while you're there.
-      </p>
-      <p>
-        That passcode is yours: it edits the game, mixes the teams, removes
-        players and closes the sign-ups — on your phone, your laptop, anywhere.
-        It does nothing to anyone else's game. Share it with whoever's helping
-        you run the night.
-      </p>
-      <p class="aside">
-        Opening a game someone else posted? Tap <b>I'm running this game</b> and
-        enter their passcode.
-      </p>
-    </article>
-
-    <article class="item">
-      <h3>Fix the details after you've posted</h3>
-      <p>
-        Court moved, start pushed back, someone dropped out and you want a
-        smaller cap — all editable now, under <b>Edit game details</b>. The name,
-        date, start time, length, place, player cap and description are all fair
-        game.
-      </p>
-      <p class="aside">
-        Rounds you've already mixed stay exactly as they were. They're a record
-        of what got played, so editing the game doesn't rewrite them. Changing
-        the date or time also moves when the game clears itself off the board.
-      </p>
-    </article>
+    <div class="earlier">
+      <div class="eitem">
+        <span class="ename">Five skill levels</span>
+        <p>
+          Beginner-intermediate and Upper-intermediate filled the gap where
+          everyone was already standing, so the mixer finally gets real signal.
+        </p>
+      </div>
+      <div class="eitem">
+        <span class="ename">Post your own game</span>
+        <p>
+          Anyone can put a slot on the board and set a passcode for it. That
+          passcode runs that game and nobody else's.
+        </p>
+      </div>
+      <div class="eitem">
+        <span class="ename">Editable details</span>
+        <p>
+          Name, date, time, length, place, cap and description can all be fixed
+          after the fact.
+        </p>
+      </div>
+      <div class="eitem">
+        <span class="ename">Self-clearing board</span>
+        <p>
+          A game disappears an hour after it ends, taking its roster with it.
+          Games with no date set stay until someone removes them.
+        </p>
+      </div>
+    </div>
   </section>
 
   <div class="close">
     <a class="go" href="/">Open the board</a>
-    <span class="stamp mono">SIAB · Updated 22 Aug 2026</span>
+    <span class="stamp mono">SIAB · Updated 5 Sep 2026</span>
   </div>
 
 </div>

@@ -260,35 +260,6 @@
     letter-spacing: .06em;
   }
 
-  /* --- who can do what ----------------------------------------- */
-  /* The one rule here with a real edge to it, so it gets its own
-     shape rather than another paragraph. */
-  .rules { margin-top: 20px; display: grid; gap: 10px; }
-  .rule {
-    display: flex;
-    gap: 13px;
-    align-items: flex-start;
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--lime);
-    border-radius: 3px;
-    padding: 13px 15px;
-  }
-  .rule.gated { border-left-color: var(--ball); }
-  .rule .who2 {
-    font-family: 'Archivo', system-ui, sans-serif;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-    color: var(--chalk);
-    flex: none;
-    width: 96px;
-    padding-top: 2px;
-  }
-  .rule p { margin: 0; font-size: 14.5px; color: var(--dim); }
-  .rule p b { color: var(--chalk); font-weight: 500; }
-
   /* --- earlier changes ----------------------------------------- */
   /* Kept rather than replaced — it's a changelog — but compressed.
      Anyone who cared about the August detail has read it by now. */
@@ -347,8 +318,6 @@
   }
 
   @media (max-width: 520px) {
-    .rule { flex-direction: column; gap: 6px; }
-    .rule .who2 { width: auto; }
     .eitem { flex-direction: column; gap: 4px; }
     .eitem .ename { width: auto; }
   }
@@ -382,7 +351,7 @@
   <section class="group">
     <div class="grouphead">
       <h2>New this month</h2>
-      <span class="groupnote">three changes</span>
+      <span class="groupnote">two changes</span>
     </div>
 
     <article class="item">
@@ -391,6 +360,10 @@
         Every mix now lists its matchups underneath the teams. Two sides is one
         matchup. Four sides is all six pairings, because with several sides up
         you play each other side in turn rather than all at once.
+      </p>
+      <p>
+        <b>Anyone can tap it in</b> — you don't need to be the one running the
+        game. Whoever's nearest the phone does it.
       </p>
 
       <div class="mock">
@@ -427,37 +400,6 @@
         night above is recorded as three results, not as three losses. Tapping a
         side that's already marked as the winner clears it, which is the
         quickest way out of a mis-tap.
-      </p>
-    </article>
-
-    <article class="item">
-      <h3>Who gets to say who won</h3>
-      <p>
-        Whoever just walked off court is almost never whoever is holding the
-        passcode, and making the gym wait for one phone was never going to work.
-        So the two halves of this are split on purpose:
-      </p>
-
-      <div class="rules">
-        <div class="rule">
-          <span class="who2">Anyone</span>
-          <p>
-            Can settle a matchup <b>nobody has recorded yet</b>. No passcode, no
-            account, no waiting for the organizer.
-          </p>
-        </div>
-        <div class="rule gated">
-          <span class="who2">The passcode</span>
-          <p>
-            Is what it takes to <b>change or clear a result already down</b>.
-            Without that rule, the last person to tap wins every argument.
-          </p>
-        </div>
-      </div>
-
-      <p class="aside">
-        The server enforces this, not your phone — so a result you recorded
-        can't be quietly rewritten by whoever opens the page next.
       </p>
     </article>
 
